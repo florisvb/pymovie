@@ -10,14 +10,16 @@ import pyglet
 import numpyimgproc as nim
 from scipy.ndimage.measurements import center_of_mass
 from scipy.ndimage.morphology import binary_erosion
-import cPickle as pickle
+from scipy.ndimage.morphology import binary_dilation
+import pickle as pickle
 import copy
 
 import numpy
 import adskalman.adskalman as adskalman
 
-THRESHHOLD = 20
-WINGTHRESHOLD = 40
+THRESHHOLD = 15
+THRESHRANGE = 15
+WINGTHRESHRANGE = 12
 ROI_RADIUS = 30
 ############################################################################################
 
@@ -56,15 +58,67 @@ def strobe_image(movie, interval=10, timerange=None, mode='darken'):
 
 def find_wings(npmovie):
     
-    for uframe in npmovie.uframes:
-        if uframe is not None:
-            uimg = uframe.uimg
-            uimg_no_body = uframe.uimg + uframe.diffthresh*255
-            uimg_no_body_thresh = uimg_no_body<WINGTHRESHOLD
-            wingimg = binary_erosion(uimg_no_body_thresh)
-            uframe.wingimg = wingimg
+    for i in range(len(npmovie.uframes)):
+        uframe = npmovie.uframes[i]
+        if uframe.uimg is not None:
+            if uframe.uimg.shape[0] == uframe.uimg.shape[1]:
+                try:
+                    uimg = uframe.uimg
+                    body = binary_dilation(uframe.diffthresh)
+                    body = binary_dilation(body)
+                    uimg_no_body = uframe.uimg + body*255
+                    
+                    threshold = uimg_no_body.min()+WINGTHRESHRANGE
+                    
+                    uimg_no_body_thresh = uimg_no_body<threshold
+                    wingimg = binary_erosion(uimg_no_body_thresh)
+                    uframe.wingimg = wingimg
+                except:
+                    pass         
+            else:
+                uframe.wingimg = None 
+                
+def split_wings(npmovie):
+    
+    for i in range(len(npmovie.uframes)):
+        #i = 11
+        uframe = npmovie.uframes[i]
+        if uframe.wingimg is not None:
+            wingimg = copy.copy(np.array(npmovie.uframes[i].wingimg, dtype=int))  
+            #wingimg = np.ones_like(wingimg)
+            #wingimg = copy.copy(np.array(npmovie.uframes[i].diffthresh, dtype=int))  
+            long_axis = npmovie.kalmanobj.long_axis[i]
             
             
+            x1 = np.array([30, 30])
+            x2 = np.array([30+long_axis[1], 30+long_axis[0]])
+            
+            m = long_axis[1]/long_axis[0]
+            b = x2[1]-m*x2[0]
+            
+            def above_body_axis(x,y):
+                pt_on_line = m*x+b
+                if y > pt_on_line:
+                    return True
+                else:
+                    return False
+                    
+            for x in range(wingimg.shape[0]):
+                for y in range(wingimg.shape[1]):
+                    is_above_axis = above_body_axis(x,y)
+                    if is_above_axis:
+                        wingimg[x,y] *= -1
+            
+            npmovie.uframes[i].wingimg2 = np.array((wingimg*127)+127, dtype=np.uint8)
+            npmovie.uframes[i].flysegs = np.array((wingimg*127)+127 + np.array(npmovie.uframes[i].diffthresh,dtype=np.uint8)*50, dtype=np.uint8)
+            npmovie.uframes[i].wingimgR = np.array( (wingimg>0) , dtype=np.uint8) *255
+            npmovie.uframes[i].wingimgL = np.array( (wingimg<0) , dtype=np.uint8) *255
+        
+def calc_wing_motion(npmovie):
+    
+    center, long_axis, ratio = nim.fit_ellipse_cov(wingimg, recenter=True)
+    wing_vector = center + long_axis*10
+        
             
 def add_wings(npmovie, mode='lighten'):
     
@@ -91,10 +145,10 @@ class Object:
         self.positions = np.zeros([len(npmovie.uframes), 2])
         self.velocities = np.zeros([len(npmovie.uframes), 2])
         self.long_axis = np.zeros([len(npmovie.uframes), 2])
-        
+        self.axis_ratio = np.zeros([len(npmovie.uframes), 1])
+        self.speed = np.zeros([len(npmovie.uframes), 1])
 
-def calc_obj_motion(npmovie, fps):
-    npmovie.fps = fps
+def calc_obj_motion(npmovie):
     npmovie.kalmanobj = Object(npmovie)
 
     ss = 4 # state size
@@ -110,22 +164,38 @@ def calc_obj_motion(npmovie, fps):
     Q = 0.0001*numpy.eye(ss) # process noise
     R = 100*numpy.eye(os) # observation noise
     
-
-    y = np.vstack( (npmovie.obj.positions[:,0], npmovie.obj.positions[:,1]) ).T
+    raw_x = np.nan_to_num(npmovie.obj.positions[:,0])
+    indices = np.nonzero(raw_x)[0].tolist()
+    raw_x = raw_x[indices]
     
-    initx = numpy.array([npmovie.obj.positions[0,0], npmovie.obj.positions[0,1],0,0],dtype=numpy.float)
+    raw_y = np.nan_to_num(npmovie.obj.positions[:,1])
+    raw_y = raw_y[indices]
+    
+    y = np.vstack( (raw_x, raw_y) ).T
+    
+    initx = numpy.array([y[0,0], y[0,1],0,0],dtype=numpy.float)
     initV = 0*numpy.eye(ss)
 
     xsmooth,Vsmooth = adskalman.kalman_smoother(y,F,H,Q,R,initx,initV)
 
-    npmovie.kalmanobj.positions = xsmooth
-    npmovie.kalmanobj.velocities = Vsmooth
+    npmovie.kalmanobj.positions[indices] = xsmooth[:,0:2]
+    npmovie.kalmanobj.velocities[indices] = xsmooth[:,2:4]
+    npmovie.kalmanobj.timestamps = [npmovie.uframes[i].timestamp for i in indices]
+    npmovie.kalmanobj.indices = indices
+    npmovie.kalmanobj.speed = np.linalg.norm(npmovie.kalmanobj.velocities[i,:]) 
+    npmovie.kalmanobj.errors = Vsmooth
     
+    # fix angles:
+    if 1:
+        for i in range(len(npmovie.kalmanobj.indices)):
+            frame = indices[i]
+            npmovie.kalmanobj.long_axis[frame] = npmovie.obj.long_axis[frame]
+            dot = np.dot(npmovie.kalmanobj.velocities[frame], npmovie.obj.long_axis[frame])
+            if dot < 0:
+                npmovie.kalmanobj.long_axis[i] *= -1
+            
     return npmovie
 
-
-    
-        
         
 def calc_obj_pos(npmovie):
 
@@ -134,7 +204,7 @@ def calc_obj_pos(npmovie):
         if uframe is not None:
             
             npmovie.obj.positions[i,:] = uframe.center
-            npmovie.obj.long_axis[i,:] = nim.fit_ellipse_cov(uframe.diffthresh)
+            npmovie.obj.long_axis[i,:], npmovie.obj.axis_ratio[i] = nim.fit_ellipse_cov(uframe.diffthresh)
                 
     return npmovie
 ################################################################################################################
@@ -142,6 +212,7 @@ def calc_obj_pos(npmovie):
 class Movie:
     def __init__(self, filename=None):
         self.mask = None
+        self.filename = filename
         if filename is not None:
             self.load_source(filename)
     
@@ -196,7 +267,7 @@ class npMovie:
         self.mask_center = [0,0]
         self.mask_radius = 50
         
-        self.blob_size_range = [100,250]
+        self.blob_size_range = [50,400]
         
         self.fps = None
         
@@ -208,15 +279,20 @@ class npMovie:
         self.height, self.width = self.background.shape
         
     def background_subtraction(self, raw, save_raw=False):
-
+    
+        mask_center_0 = int(self.mask_center[0])
+        mask_center_1 = int(self.mask_center[1])
+        mask_0_lo = max(0, mask_center_0 - self.mask_radius)
+        mask_0_hi = min(self.width, mask_center_0 + self.mask_radius)
+        mask_1_lo = max(0, mask_center_1 - self.mask_radius)
+        mask_1_hi = min(self.width, mask_center_1 + self.mask_radius)
+        if self.tracking_mask is not None:
+            tracking_mask = self.tracking_mask
+            tracking_mask[mask_0_lo:mask_0_hi, mask_1_lo:mask_1_hi] = 1
+        
         if self.dynamic_tracking_mask is True:
+            # TODO: currently dynamic tracking and such only works for square format cameras 
             print 'dynamic tracking'
-            mask_center_0 = int(self.mask_center[0])
-            mask_center_1 = int(self.mask_center[1])
-            mask_0_lo = max(0, mask_center_0 - self.mask_radius)
-            mask_0_hi = min(self.width, mask_center_0 + self.mask_radius)
-            mask_1_lo = max(0, mask_center_1 - self.mask_radius)
-            mask_1_hi = min(self.width, mask_center_1 + self.mask_radius)
             masked_img = raw[mask_0_lo:mask_0_hi, mask_1_lo:mask_1_hi]
             masked_background = self.background[mask_0_lo:mask_0_hi, mask_1_lo:mask_1_hi]
         else:
@@ -225,19 +301,31 @@ class npMovie:
         
             
         absdiff = nim.absdiff(masked_img, masked_background)
-        diffthresh = nim.threshold(absdiff, THRESHHOLD)
-            
         if self.dynamic_tracking_mask is False and self.tracking_mask is not None:
-            diffthresh *= self.tracking_mask
+            absdiff *= tracking_mask
             
+        threshold = max( 10, absdiff.max() - THRESHRANGE )
+        print 'dynamic threshold: ', threshold 
         
-        ## TODO: right now this assumes the thresholding is perfect...!
-        # find center of fly:
+        diffthresh = nim.threshold(absdiff, threshold)
         blobs = nim.find_blobs(diffthresh, self.blob_size_range)
+        
+        if blobs is None:
+            self.dynamic_tracking_mask = False
+            masked_img = raw
+            masked_background = self.background
+            
+            absdiff = nim.absdiff(masked_img, masked_background)
+            diffthresh = nim.threshold(absdiff, threshold)
+            if self.dynamic_tracking_mask is False and self.tracking_mask is not None:
+                diffthresh *= tracking_mask
+            blobs = nim.find_blobs(diffthresh, self.blob_size_range)
+        
         
         if blobs is None:
             uframe = uFrame()
             if save_raw is False:
+                print 'no uframe'
                 return uframe, None
             else:
                 frame = Frame(raw, absdiff, diffthresh)
@@ -245,24 +333,18 @@ class npMovie:
             
         nblobs = blobs.max()
         if nblobs > 1:
-            blobs = nim.find_smallest_blob(blobs)
+            blobs = nim.find_biggest_blob(blobs)
             
-        center = center_of_mass(blobs)
+        center = nim.center_of_blob(blobs)
         
+        print 'center found'
         if 1:
-            limlo_x = center[0]-ROI_RADIUS
-            if limlo_x < 0:
-                limlo_x = 0
-            limhi_x = center[0]+ROI_RADIUS
-            if limhi_x > movie.height:
-                limhi_x = movie.height
-            limlo_y = center[1]-ROI_RADIUS
-            if limlo_y < 0:
-                limlo_y = 0
-            limhi_y = center[1]+ROI_RADIUS
-            if limhi_y > movie.width:
-                limhi_y = movie.width
-                
+            limlo_x = max( int(center[0])-ROI_RADIUS, 0 )
+            limlo_y = max( int(center[1])-ROI_RADIUS, 0 )
+            
+            limhi_x = min( int(center[0])+ROI_RADIUS, masked_img.shape[0] )
+            limhi_y = min( int(center[1])+ROI_RADIUS, masked_img.shape[1] )
+            
             # TODO: right now object entering or leaving frame doesnt work perfectly
             uimg = masked_img[limlo_x:limhi_x, limlo_y:limhi_y]
             uimg = copy.copy(uimg)
@@ -272,15 +354,18 @@ class npMovie:
             uimg_diffthresh = copy.copy(uimg_diffthresh)
             
             if self.dynamic_tracking_mask is True:
-                tmp = np.array([float(self.mask_radius), float(self.mask_radius)])
+                tmp = np.array([masked_img.shape[0]/2., masked_img.shape[1]/2.])
                 center = np.array(self.mask_center) + np.array(center) - tmp
+                uimg_indices = [mask_0_lo+limlo_x, mask_0_lo+limhi_x, mask_1_lo+limlo_y, mask_1_lo+limhi_y]
+            else:
+                uimg_indices = [limlo_x, limhi_x, limlo_y, limhi_y]
             self.dynamic_tracking_mask = True
             self.mask_center = center
             
-            print center
-            
             uframe = uFrame(center, uimg, uimg_absdiff, uimg_diffthresh) 
             uframe.blobsize = blobs.sum()
+            
+            uframe.indices = uimg_indices
                 
             if save_raw is False:
                 del(raw)
@@ -289,7 +374,7 @@ class npMovie:
                 del(blobs)
                 return uframe, None
                 
-            frame = Frame(raw, absdiff, diffthresh)
+            frame = Frame(masked_img, absdiff, diffthresh)
         return uframe, frame    
         
     def load_frames(self, movie, timerange=None, save_raw=False):
@@ -309,8 +394,10 @@ class npMovie:
             timestamp = movie.source.get_next_video_timestamp()
             if timestamp > timerange[1]:
                 break
-                
-            raw = movie.get_next_frame()    
+            try:
+                raw = movie.get_next_frame()    
+            except:
+                break
             if 1:       
                 uframe,frame = self.background_subtraction(raw, save_raw=save_raw)
                 uframe.timestamp = timestamp
@@ -324,7 +411,7 @@ class npMovie:
                 
                 self.uframes.append(uframe)
             fr += 1
-            print 'loading... frame num: ', fr, '  ::  ', 'timestamp: ', timestamp, ' :: ', timestamp/movie.duration*100, '%'
+            print 'loading...', movie.filename, ' frame num: ', fr, '  ::  ', 'timestamp: ', timestamp, ' :: ', timestamp/movie.duration*100, '%'
             
 class Frame:
     def __init__(self, raw, absdiff=None, diffthresh=None):
@@ -353,6 +440,7 @@ class uFrame:
         self.center = center
         self.absdiff = absdiff
         self.diffthresh = diffthresh
+        self.wingimg = None
         self.timestamp = None
     def show(self, var='uimg'):
         if var == 'uimg':
@@ -360,7 +448,13 @@ class uFrame:
         elif var == 'absdiff':
             plt.imshow(self.absdiff)
         elif var == 'diffthresh':
-            plt.imshow(self.diffthresh)  
+            plt.imshow(self.diffthresh)
+        elif var == 'wingimg':
+            plt.imshow(self.wingimg)  
+        elif var == 'wingimg2':
+            plt.imshow(self.wingimg2)
+        elif var == 'flysegs':
+            plt.imshow(self.flysegs)
         else:
             print 'please use a valid var'
             return
@@ -369,7 +463,7 @@ class uFrame:
         
 if __name__ == '__main__':
 
-    filename =  '/media/SA1_videos/sa1_videos/20101027_C001H001S0006.avi'
+    filename =   '/media/SA1_movies_2/sa1_movies/20101028_C001H001S0008.avi'
     
     movie = Movie(filename)
     npmovie = npMovie()
@@ -386,11 +480,9 @@ if __name__ == '__main__':
     npmovie.calc_background(movie)
     npmovie.load_frames(movie)
     
-    save(npmovie, 'sa1_movie')
-    
     npmovie.obj = Object(npmovie)
     calc_obj_pos(npmovie)
     calc_obj_motion(npmovie, 5000.)
-    save(npmovie, 'sa1_movie_obj')
+    save(npmovie, 'sa1_movie_obj_flyby_20101028_C001H001S0008')
     
     

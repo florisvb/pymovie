@@ -60,7 +60,7 @@ def find_blobs(img, sizerange=[0,inf]):
     
     if nblobs < 1:
         return None
-    
+    #print 'n blobs: ', nblobs
     # erode filter
     n_filtered = 0
     for n in range(1,nblobs+1):
@@ -223,20 +223,53 @@ def fit_ellipse(img, full_output=False):
         Z = ellipse(X, Y, center, a, b, angle)
         return center, a, b, angle, Z
         
+def center_of_blob(img):
+    center = np.array([center_of_mass(img)[i] for i in range(2)])
+    return center
+    
+def extract_blob(img, radius=None):
+    center = center_of_blob(img)
+    pts = np.transpose(np.nonzero(img)).T
+    if radius is None: # find minumum bounding box
+        x_lo = pts[0,:].min()
+        x_hi = pts[0,:].max()
+        y_lo = pts[1,:].min()
+        y_hi = pts[1,:].max()
+        radius = int(max( center[0]-x_lo, x_hi-center[0], center[1]-y_lo, y_hi-center[1] ))
+        print center, radius
+        print x_lo, x_hi, y_lo, y_hi
         
-def fit_ellipse_cov(img):
+    uimg = img[center[0]-radius:center[0]+radius+1, center[1]-radius:center[1]+radius+1]
+    return center, uimg
+        
+def fit_ellipse_cov(img, erode=True, recenter=False):
     # Pattern. Recogn. 20, Sept. 1998, pp. 31-40
     # J. Prakash, and K. Rajesh
     # Human Face Detection and Segmentation using Eigenvalues of Covariance Matrix, Hough Transform and Raster Scan Algorithms
 
     #eroded_img = binary_erosion(img)
     #boundary = img-eroded_img
-    pts = np.transpose(np.nonzero(img)).T
-    cov = np.cov(pts)
-    e,v = np.linalg.eig(cov)
-    long_axis = v[:,0]
-    
-    return long_axis
+    if erode:
+        img = binary_erosion(img)
+
+    if recenter:
+        center = center_of_blob(img)
+
+    try:
+        pts = (np.transpose(np.nonzero(img))-center).T
+        cov = np.cov(pts)
+        e,v = np.linalg.eig(cov)
+        ratio = max(e) / min(e)
+        i = np.argmax(e)
+        long_axis = v[:,i]
+    except:
+        long_axis = [0,0]
+        ratio = 1
+    if recenter is False:
+        return long_axis, ratio
+    else:
+        return center, long_axis, ratio
+        
 ############################################################################
 
 
