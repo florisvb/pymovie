@@ -19,9 +19,27 @@ import adskalman.adskalman as adskalman
 
 THRESHHOLD = 15
 THRESHRANGE = 15
-WINGTHRESHRANGE = 12
+WINGTHRESHRANGE = 17
 ROI_RADIUS = 30
 ############################################################################################
+
+def nextpow2(x):
+    b = np.log2(x)
+    p = np.ceil(b)
+    return(p)
+
+def calc_wingbeat_frequency(npmovie, framerange):
+    
+    arr = npmovie.kalmanobj.wingangleR[framerange[0]:framerange[1]]
+    arr = arr.reshape(len(arr))
+    L = len(arr)
+    A = np.abs(np.fft.fft(arr, L))[1:int(L/2.)]    
+    timestep = 1/npmovie.fps
+    freq = np.fft.fftfreq(int(L), d=timestep)[1:int(L/2.)]    
+    
+    return freq[np.argmax(A)]
+
+
 
 def save(movie, filename):
     fname = (filename)  
@@ -78,7 +96,7 @@ def find_wings(npmovie):
             else:
                 uframe.wingimg = None 
                 
-def split_wings(npmovie):
+def split_wings_bodyaxis(npmovie):
     
     for i in range(len(npmovie.uframes)):
         #i = 11
@@ -113,12 +131,155 @@ def split_wings(npmovie):
             npmovie.uframes[i].flysegs = np.array((wingimg*127)+127 + np.array(npmovie.uframes[i].diffthresh,dtype=np.uint8)*50, dtype=np.uint8)
             npmovie.uframes[i].wingimgR = np.array( (wingimg>0) , dtype=np.uint8) *255
             npmovie.uframes[i].wingimgL = np.array( (wingimg<0) , dtype=np.uint8) *255
+            
+def split_wings_blobs(npmovie):
+    
+    for i in range(len(npmovie.uframes)):
+        #i = 11
+        uframe = npmovie.uframes[i]
+        if uframe.wingimg is not None:
+            wingimg = copy.copy(np.array(npmovie.uframes[i].wingimg, dtype=int))  
+            
+            #wingimg = np.ones_like(wingimg)
+            #wingimg = copy.copy(np.array(npmovie.uframes[i].diffthresh, dtype=int))  
+            long_axis = npmovie.kalmanobj.long_axis[i]
+            x1 = np.array([30, 30])
+            x2 = np.array([30+long_axis[1], 30+long_axis[0]])
+            m = long_axis[1]/long_axis[0]
+            b = x2[1]-m*x2[0]
+            
+            def above_body_axis(x,y):
+                pt_on_line = m*x+b
+                if y > pt_on_line:
+                    return True
+                else:
+                    return False
+                    
+            def get_mean_axis(w1):
+                for x in range(w1.shape[0]):
+                    for y in range(w1.shape[1]):
+                        is_above_axis = above_body_axis(x,y)
+                        if is_above_axis:
+                            w1[x,y] *= -1
+                w1_avg = np.mean(w1)
+                return w1_avg
+                
+            # find biggest blob, check to see if its center is near where the center of a wing was last round. if so, it's the new position of that wing. 
+                
+            w1, w2 = nim.find_2_biggest_blobs(wingimg)
+            
+            if w1 is not None:
+                c1 = nim.center_of_blob(w1)
+                c1_above_axis = above_body_axis(c1[0],c1[1])
+                w1_avg = get_mean_axis(w1)
+            else:
+                w1_avg = 0
+                w1 = np.zeros_like(wingimg)
+                
+            if w2 is not None:
+                c2 = nim.center_of_blob(w2)
+                c2_above_axis = above_body_axis(c2[0],c2[1])
+                w2_avg = get_mean_axis(w2)
+            else:
+                w2_avg = 0
+                w2 = np.zeros_like(wingimg)
+            
+            if c1_above_axis:
+                npmovie.uframes[i].wingimgR = np.array( w1 , dtype=np.uint8) 
+                npmovie.uframes[i].wingimgL = np.array( w2 , dtype=np.uint8) 
+            elif c2_above_axis:
+                npmovie.uframes[i].wingimgR = np.array( w2 , dtype=np.uint8) 
+                npmovie.uframes[i].wingimgL = np.array( w1 , dtype=np.uint8) 
+            else:
+                npmovie.uframes[i].wingimgR = np.array( np.zeros_like(wingimg) , dtype=np.uint8) 
+                npmovie.uframes[i].wingimgL = np.array( np.zeros_like(wingimg) , dtype=np.uint8) 
+                
+            npmovie.uframes[i].wingimg2 = np.array((wingimg*127)+127, dtype=np.uint8)
+            npmovie.uframes[i].flysegs = np.array(  npmovie.uframes[i].wingimgR*127 +
+                                                    npmovie.uframes[i].wingimgL*255 +
+                                                    np.array(npmovie.uframes[i].diffthresh,dtype=np.uint8)*50, dtype=np.uint8)
+            
+
+def split_wings_blobs(npmovie):
+    
+    for i in range(len(npmovie.uframes)):
+        #i = 11
+        uframe = npmovie.uframes[i]
+        if uframe.wingimg is not None:
+            wingimg = copy.copy(np.array(npmovie.uframes[i].wingimg, dtype=int))  
+            
+            #wingimg = np.ones_like(wingimg)
+            #wingimg = copy.copy(np.array(npmovie.uframes[i].diffthresh, dtype=int))  
+            long_axis = npmovie.kalmanobj.long_axis[i]
+            x1 = np.array([30, 30])
+            x2 = np.array([30+long_axis[1], 30+long_axis[0]])
+            m = long_axis[1]/long_axis[0]
+            b = x2[1]-m*x2[0]
+            
+            def above_body_axis(x,y):
+                pt_on_line = m*x+b
+                if y > pt_on_line:
+                    return True
+                else:
+                    return False
+                    
+            def get_mean_axis(w1):
+                for x in range(w1.shape[0]):
+                    for y in range(w1.shape[1]):
+                        is_above_axis = above_body_axis(x,y)
+                        if is_above_axis:
+                            w1[x,y] *= -1
+                w1_avg = np.mean(w1)
+                return w1_avg
+                
+            # find biggest blob, check to see if its center is near where the center of a wing was last round. if so, it's the new position of that wing. 
+                
+            w1, w2 = nim.find_2_biggest_blobs(wingimg)
+            
+            if w1 is not None:
+                c1 = nim.center_of_blob(w1)
+                c1_above_axis = above_body_axis(c1[0],c1[1])
+                w1_avg = get_mean_axis(w1)
+            else:
+                w1_avg = 0
+                w1 = np.zeros_like(wingimg)
+                
+            if w2 is not None:
+                c2 = nim.center_of_blob(w2)
+                c2_above_axis = above_body_axis(c2[0],c2[1])
+                w2_avg = get_mean_axis(w2)
+            else:
+                w2_avg = 0
+                w2 = np.zeros_like(wingimg)
+            
+            if c1_above_axis:
+                npmovie.uframes[i].wingimgR = np.array( w1 , dtype=np.uint8) 
+                npmovie.uframes[i].wingimgL = np.array( w2 , dtype=np.uint8) 
+            elif c2_above_axis:
+                npmovie.uframes[i].wingimgR = np.array( w2 , dtype=np.uint8) 
+                npmovie.uframes[i].wingimgL = np.array( w1 , dtype=np.uint8) 
+            else:
+                npmovie.uframes[i].wingimgR = np.array( np.zeros_like(wingimg) , dtype=np.uint8) 
+                npmovie.uframes[i].wingimgL = np.array( np.zeros_like(wingimg) , dtype=np.uint8) 
+                
+            npmovie.uframes[i].wingimg2 = np.array((wingimg*127)+127, dtype=np.uint8)
+            npmovie.uframes[i].flysegs = np.array(  npmovie.uframes[i].wingimgR*127 +
+                                                    npmovie.uframes[i].wingimgL*255 +
+                                                    np.array(npmovie.uframes[i].diffthresh,dtype=np.uint8)*50, dtype=np.uint8)
+                                                    
+                                                        
+            
         
 def calc_wing_motion(npmovie):
-    
-    center, long_axis, ratio = nim.fit_ellipse_cov(wingimg, recenter=True)
-    wing_vector = center + long_axis*10
-        
+    npmovie.obj.wingcenterR = np.zeros([len(npmovie.uframes), 2])
+    #npmovie.obj.wingaxisR = np.zeros([len(npmovie.uframes), 2])
+
+    for i in range(len(npmovie.uframes)):
+        uframe = npmovie.uframes[i]
+        if uframe.wingimg is not None:
+            center, long_axis, ratio = nim.fit_ellipse_cov(uframe.wingimgR, recenter=True)
+            npmovie.obj.wingcenterR[i] = center
+            
             
 def add_wings(npmovie, mode='lighten'):
     
@@ -136,8 +297,74 @@ def add_wings(npmovie, mode='lighten'):
                     
     return wingsum
     
+def calc_wing_angle(npmovie):
+    npmovie.obj.wingangleR = np.zeros([len(npmovie.uframes), 1])
+    
+    for i in range(len(npmovie.uframes)):
+        uframe = npmovie.uframes[i]
+        if uframe.wingimg is not None:
+            wingvector = npmovie.kalmanobj.wingaxisR[i] 
+            bodyvector = npmovie.kalmanobj.long_axis[i] 
+            dotprod = np.dot(wingvector, bodyvector)
+            cosangle = dotprod / np.linalg.norm(wingvector)*np.linalg.norm(bodyvector)
+            angle = np.arccos(cosangle)
+            if np.isnan(angle):
+                try:
+                    angle = npmovie.obj.wingangleR[i-1]
+                except:
+                    angle = 0.
+            npmovie.obj.wingangleR[i] = angle
+            
+def interp_nan_values(npmovie):
+    warr = npmovie.obj.wingcenterR
+    npmovie.kalmanobj.wingcenterR = np.zeros([len(npmovie.uframes), 2])
+    npmovie.kalmanobj.wingaxisR = np.zeros([len(npmovie.uframes), 2])
+    
+    for i, w in enumerate(warr):
+        
+        if np.isnan(w[0]):
+            prev = npmovie.kalmanobj.wingcenterR[i-1]
+            next = np.array([np.nan, np.nan])
+            n = 1
+            while np.isnan(next[0]):
+                next = warr[i+n]
+                n += 1
+            diff = next-prev
+            inc = diff/float(n)
+            new = prev+inc
+            npmovie.kalmanobj.wingcenterR[i] = new
+        else:
+            npmovie.kalmanobj.wingcenterR[i] = warr[i]
+            
+    vec = npmovie.kalmanobj.wingcenterR - npmovie.uframes[i].uimg.shape[0]
+    for i, v in enumerate(vec):
+        npmovie.kalmanobj.wingaxisR[i] = np.nan_to_num( vec[i] / np.linalg.norm(vec[i]) )
+        
+                
+def kalmanize_wing_angle(npmovie):
 
+    npmovie.kalmanobj.wingangleR = np.zeros([len(npmovie.uframes), 1])
 
+    ss = 2 # state size
+    os = 1 # observation size
+    F = numpy.array([[1,0],
+                     [0,1]],
+                    dtype=numpy.float)
+    H = numpy.array([[1,0]],
+                    dtype=numpy.float)
+    Q = 0.0001*numpy.eye(ss) # process noise
+    R = 0.001*numpy.eye(os) # observation noise
+    
+    raw_x = npmovie.obj.wingangleR
+    indices = np.nonzero(raw_x)[0].tolist()
+    raw_x = raw_x[indices]
+    
+    initx = numpy.array([raw_x[0][0],0],dtype=numpy.float)
+    initV = 0*numpy.eye(ss)
+
+    xsmooth,Vsmooth = adskalman.kalman_smoother(raw_x,F,H,Q,R,initx,initV)
+    
+    npmovie.kalmanobj.wingangleR[indices] = xsmooth[:,0].reshape(xsmooth.shape[0], 1)
 
 ############################################################################################
 class Object:
@@ -186,13 +413,17 @@ def calc_obj_motion(npmovie):
     npmovie.kalmanobj.errors = Vsmooth
     
     # fix angles:
+    dot_arr = np.zeros([len(npmovie.uframes), 1])
+    
     if 1:
         for i in range(len(npmovie.kalmanobj.indices)):
             frame = indices[i]
-            npmovie.kalmanobj.long_axis[frame] = npmovie.obj.long_axis[frame]
+            npmovie.kalmanobj.long_axis[frame] = npmovie.obj.long_axis[frame] / np.linalg.norm(npmovie.obj.long_axis[frame])
             dot = np.dot(npmovie.kalmanobj.velocities[frame], npmovie.obj.long_axis[frame])
-            if dot < 0:
-                npmovie.kalmanobj.long_axis[i] *= -1
+            dot_arr[frame] = np.sign(dot)
+        mode_dot = np.sign(np.mean(dot_arr))
+        if mode_dot < 0:
+            npmovie.kalmanobj.long_axis *= -1
             
     return npmovie
 
@@ -217,6 +448,7 @@ class Movie:
             self.load_source(filename)
     
     def load_source(self, filename):
+        print 'loading source'
         try:
             self.source = media.load(filename)
             self.width = int(self.source.video_format.width)

@@ -12,7 +12,7 @@ import numpyimgproc as nim
 import pickle
 from optparse import OptionParser
 
-def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg'):
+def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg', frames=None, framerange=None):
 
     w = window.Window(visible=False, resizable=True)
     
@@ -29,8 +29,19 @@ def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg'):
 
     glEnable(GL_BLEND)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
-    for uframe in npmovie.uframes:
+    
+    if frames is None:
+        if framerange is not None:
+            start = framerange[0]
+            stop = framerange[1]
+            if stop == -1:
+                stop = len(npmovie.uframes)
+            frames = np.arange(start, stop)
+        else:
+            frames = np.arange(1,len(npmovie.uframes))
+    
+    for f in frames:
+        uframe = npmovie.uframes[f]
         if uframe.uimg is not None:
             try:
                 if mode == 'uimg':
@@ -63,16 +74,32 @@ def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg'):
                     w.width = arr.shape[1]
                     w.height = arr.shape[0]
                     aii = ArrayInterfaceImage(arr)
-        img = aii.texture
-        # add some overlays:
-        
-        w.dispatch_events()
-        
-        background.blit_tiled(0, 0, 0, w.width, w.height)
-        img.blit(0, 0, 0)
-        w.flip()
-        pyglet.graphics.draw(2, pyglet.gl.GL_LINES,('v2i', (10, 15, 30, 35)))
-        time.sleep(delay) # slow down the playback
+                    
+                img = aii.texture
+                
+                w.dispatch_events()
+                
+                background.blit_tiled(0, 0, 0, w.width, w.height)
+                img.blit(0, 0, 0)
+                
+                # add some overlays:
+                r = arr.shape[0]/2.
+                body_axis = npmovie.kalmanobj.long_axis[f]
+                wing_axis = npmovie.kalmanobj.wingaxisR[f]
+                wing_center = npmovie.kalmanobj.wingcenterR[f]
+                #print wing_center, wing_axis
+                print r, wing_center
+                pyglet.graphics.draw(2, pyglet.gl.GL_LINES,('v2i', (int(r), int(r), int(body_axis[1]*10*magnify)+int(r), int(body_axis[0]*10*magnify)+int(r))))
+                
+                try:        
+                    pyglet.graphics.draw(2, pyglet.gl.GL_LINES,('v2i', (int(r), int(r), int(wing_center[1]*magnify), int(wing_center[0]*magnify))))
+                    pyglet.graphics.draw(1, pyglet.gl.GL_POINTS,('v2i', (int(wing_center[1]*magnify), int(wing_center[0]*magnify))))
+                    pass
+                except:
+                    pass
+                w.flip()
+                
+                time.sleep(delay) # slow down the playback
         
     w.close()
 

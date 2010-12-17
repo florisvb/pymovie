@@ -26,19 +26,20 @@ def process_movie(filename):
         npmovie.tracking_mask = tracking_mask
 
         npmovie.calc_background(movie)
-        npmovie.load_frames(movie, timerange=[25,35])
+        npmovie.load_frames(movie)
         
         npmovie.fps = 5000.
         
         npmovie.obj = pm.Object(npmovie)
         pm.calc_obj_pos(npmovie)
-        try:
-            pm.calc_obj_motion(npmovie)
-        except:
-            npmovie.kalmanobj = None
-            
+        pm.calc_obj_motion(npmovie)
+                    
         pm.find_wings(npmovie)
-        pm.split_wings(npmovie)
+        pm.split_wings_blobs(npmovie)
+        pm.calc_wing_motion(npmovie)
+        pm.interp_nan_values(npmovie)
+        pm.calc_wing_angle(npmovie)
+        pm.kalmanize_wing_angle(npmovie)
             
         movie_info[filename].setdefault('KalmanObj', npmovie.kalmanobj)
         movie_info[filename].setdefault('Obj', npmovie.obj)

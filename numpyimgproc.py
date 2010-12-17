@@ -94,7 +94,13 @@ def find_biggest_blob(img):
             biggest_blob_size = blob_size
             
     return biggest_blob 
-
+    
+def find_2_biggest_blobs(img):
+    blobs, nblobs = ndimage.label(img)
+    b1 = find_biggest_blob(blobs)
+    blobs[b1] = 0
+    b2 = find_biggest_blob(blobs)
+    return b1, b2
 
 def find_smallest_blob(img):
     blobs, nblobs = ndimage.label(img)
@@ -249,26 +255,39 @@ def fit_ellipse_cov(img, erode=True, recenter=False):
 
     #eroded_img = binary_erosion(img)
     #boundary = img-eroded_img
-    if erode:
-        img = binary_erosion(img)
+    
+    if img is not None:
+    
+        if erode:
+            try:
+                img = binary_erosion(img)
+            except:
+                pass
+                
+        if recenter:
+            center = center_of_blob(img)
+        else:
+            center = np.array([0,0])
 
-    if recenter:
-        center = center_of_blob(img)
-
-    try:
-        pts = (np.transpose(np.nonzero(img))-center).T
-        cov = np.cov(pts)
-        e,v = np.linalg.eig(cov)
-        ratio = max(e) / min(e)
-        i = np.argmax(e)
-        long_axis = v[:,i]
-    except:
-        long_axis = [0,0]
-        ratio = 1
-    if recenter is False:
-        return long_axis, ratio
+        if 1:
+            pts = np.transpose(np.nonzero(img))
+            for pt in pts:
+                pt -= center
+            pts = (np.transpose(np.nonzero(img))).T
+            cov = np.cov(pts)
+            cov = np.nan_to_num(cov)
+            e,v = np.linalg.eig(cov)
+            ratio = max(e) / min(e)
+            
+            i = np.argmax(e)
+            long_axis = v[:,i]
+        if recenter is False:
+            return long_axis, ratio
+        else:
+            return center, long_axis, ratio
+            
     else:
-        return center, long_axis, ratio
+        return [0,0],0
         
 ############################################################################
 
