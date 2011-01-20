@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+import psychopy as psy
+
 import scipy.optimize
 from scipy.ndimage.measurements import center_of_mass
 import scipy.ndimage as ndimage
@@ -43,8 +45,10 @@ def lighten(a, b=None):
     result = compare(a,b,method='lighten')
     return result
     
-def threshold(img, threshold):
-    threshed = img>threshold
+def threshold(img, threshold_lo, threshold_hi=255):
+    threshed_lo = img>threshold_lo
+    threshed_hi = img<threshold_hi
+    threshed = threshed_lo*threshed_hi
     threshed *= 255
     return threshed
     
@@ -55,11 +59,35 @@ def absdiff(a,b):
     absdiff = np.abs(diff)
     return absdiff
     
-def find_blobs(img, sizerange=[0,inf]):
-    blobs, nblobs = ndimage.label(img)
+def auto_adjust_levels(img):
+      
+    img2 = (img-img.min())
+    if img2.max() > 0:
+        img3 = img2*int(255/float(img2.max()))
+    else:
+        img3 = img2
+        
+    return img3
     
+def smooth(img, freq=0.5):
+
+    size = img.shape
+    imgf = psy.imfft(img)
+    butter_filter = psy.butter2d_lp(size, freq, n=1)
+
+    imgf_filtered = imgf*butter_filter
+    img_filtered = psy.imifft(imgf_filtered)
+    
+    return img_filtered
+    
+def find_blobs(img, sizerange=[0,inf], aslist=False):
+    blobs, nblobs = ndimage.label(img)
+    blob_list = []
     if nblobs < 1:
-        return None
+        if aslist is False:
+            return np.zeros_like(img)
+        else:
+            return [np.zeros_like(img)]
     #print 'n blobs: ', nblobs
     # erode filter
     n_filtered = 0
@@ -69,13 +97,24 @@ def find_blobs(img, sizerange=[0,inf]):
             blobs[blobs==n] = 0
             nblobs -= 1
         else:
-            n_filtered += 1
-            blobs[blobs==n] = n_filtered
-    if nblobs < 1:
-        return None
-        
-    return blobs
+            if aslist:
+                b = np.array(blobs==n, dtype=np.uint8)
+                blob_list.append(b)
+            else:
+                n_filtered += 1
+                blobs[blobs==n] = n_filtered
     
+    if aslist is False:
+        if nblobs < 1:
+            return np.zeros_like(img)
+        else:
+            blobs = np.array( (blobs>0)*255, dtype=np.uint8)
+            return blobs
+    else:
+        if len(blob_list) < 1:
+            blob_list = [np.zeros_like(img)]
+        return blob_list
+        
 def find_biggest_blob(img):
     blobs, nblobs = ndimage.label(img)
     
@@ -92,7 +131,7 @@ def find_biggest_blob(img):
         if blob_size > biggest_blob_size:
             biggest_blob = blobs==n
             biggest_blob_size = blob_size
-            
+    biggest_blob = np.array(biggest_blob, dtype=np.uint8)
     return biggest_blob 
     
 def find_2_biggest_blobs(img):
@@ -101,6 +140,18 @@ def find_2_biggest_blobs(img):
     blobs[b1] = 0
     b2 = find_biggest_blob(blobs)
     return b1, b2
+    
+def find_n_biggest_blobs(img, n=1):
+    blobs, nblobs = ndimage.label(img)
+    
+    blob_list = []
+    for i in range(n):
+        b = find_biggest_blob(blobs)
+        if b == None:
+            break
+        blob_list.append(b)
+        blobs[b>0] = 0
+    return blob_list
 
 def find_smallest_blob(img):
     blobs, nblobs = ndimage.label(img)
@@ -230,8 +281,15 @@ def fit_ellipse(img, full_output=False):
         return center, a, b, angle, Z
         
 def center_of_blob(img):
-    center = np.array([center_of_mass(img)[i] for i in range(2)])
-    return center
+    if type(img) is list:
+        centers = []
+        for blob in img:
+            center = np.array([center_of_mass(blob)[i] for i in range(2)])
+            centers.append(center)
+        return centers
+    else:
+        center = np.array([center_of_mass(img)[i] for i in range(2)])
+        return center
     
 def extract_blob(img, radius=None):
     center = center_of_blob(img)

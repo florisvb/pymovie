@@ -12,7 +12,7 @@ import numpyimgproc as nim
 import pickle
 from optparse import OptionParser
 
-def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg', frames=None, framerange=None):
+def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg', frames=None, framerange=None, print_frames=False):
 
     w = window.Window(visible=False, resizable=True)
     
@@ -46,8 +46,20 @@ def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg', frames=None, frameran
             try:
                 if mode == 'uimg':
                     arr = uframe.uimg
+                if mode == 'legs':
+                    arr = uframe.legs
+                if mode == 'body':
+                    arr = uframe.body
+                if mode == 'wings':
+                    arr = uframe.wings
+                if mode == 'absdiff':
+                    arr = uframe.absdiff
                 if mode == 'wingimg2':
                     arr = uframe.wingimg2
+                if mode == 'wingimgR':
+                    arr = uframe.wingimgR
+                if mode == 'wingimgL':
+                    arr = uframe.wingimgL
                 if mode == 'wingimg':
                     arr = uframe.wingimg
                 if mode == 'flysegs':
@@ -61,7 +73,7 @@ def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg', frames=None, frameran
                 arr = None
                 
             if arr is not None:
-                if arr.dtype =='bool':
+                if arr.dtype != np.uint8:
                     'converting'
                     arr = np.array(arr, dtype=np.uint8)*255
                     
@@ -85,18 +97,20 @@ def play_npmovie(npmovie, delay=0, magnify=1, mode='uimg', frames=None, frameran
                 # add some overlays:
                 r = arr.shape[0]/2.
                 body_axis = npmovie.kalmanobj.long_axis[f]
-                wing_axis = npmovie.kalmanobj.wingaxisR[f]
-                wing_center = npmovie.kalmanobj.wingcenterR[f]
-                #print wing_center, wing_axis
-                print r, wing_center
-                pyglet.graphics.draw(2, pyglet.gl.GL_LINES,('v2i', (int(r), int(r), int(body_axis[1]*10*magnify)+int(r), int(body_axis[0]*10*magnify)+int(r))))
                 
-                try:        
-                    pyglet.graphics.draw(2, pyglet.gl.GL_LINES,('v2i', (int(r), int(r), int(wing_center[1]*magnify), int(wing_center[0]*magnify))))
-                    pyglet.graphics.draw(1, pyglet.gl.GL_POINTS,('v2i', (int(wing_center[1]*magnify), int(wing_center[0]*magnify))))
-                    pass
-                except:
-                    pass
+                if 0:
+                    wing_axis = npmovie.kalmanobj.wingaxisR[f]
+                    wing_center = npmovie.kalmanobj.wingcenterR[f]
+                    #print wing_center, wing_axis
+                    if mode == 'wingimgR':
+                        print f, uframe.wingimgR.sum() 
+                    pyglet.graphics.draw(2, pyglet.gl.GL_LINES,('v2i', (int(r), int(r), int(body_axis[1]*10*magnify)+int(r), int(body_axis[0]*10*magnify)+int(r))))
+                    try:        
+                        pyglet.graphics.draw(2, pyglet.gl.GL_LINES,('v2i', (int(r), int(r), int(wing_center[1]*magnify), int(wing_center[0]*magnify))))
+                        pyglet.graphics.draw(1, pyglet.gl.GL_POINTS,('v2i', (int(wing_center[1]*magnify), int(wing_center[0]*magnify))))
+                        pass
+                    except:
+                        pass
                 w.flip()
                 
                 time.sleep(delay) # slow down the playback

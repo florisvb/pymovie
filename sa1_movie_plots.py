@@ -24,6 +24,38 @@ import pygmovie as pm
 
 import copy
 
+def get_active_frames(npmovie):
+    # series of frames where position is not (0,0)
+
+    p = 0
+    f = 0
+    interval = 10
+    while p < 1:
+        f += 1
+        tmp = [np.sum(npmovie.kalmanobj.positions[ff]) for ff in range(f,f+interval)]
+        p = np.min( tmp )
+    start = f
+    
+    p = 2
+    f = start
+    interval = 2
+    while p > 1:
+        f += 1
+        if f+interval > len(npmovie.uframes)-1:
+            break
+        tmp = [np.sum(npmovie.kalmanobj.positions[ff]) for ff in range(f,f+interval)]
+        p = np.min( tmp )
+    stop = f
+        
+    active_range = np.arange(start, stop).tolist()
+    return active_range
+    
+def get_all_frames(npmovie):
+    
+    active_range = np.nonzero(npmovie.kalmanobj.positions[:,0])[0].tolist()
+    
+    return active_range
+        
 def load(filename):
     fname = (filename)  
     fd = open( fname, mode='r' )
@@ -32,14 +64,22 @@ def load(filename):
     return npmovie
     
     
-def xy_kalman(npmovie):
+def xy_kalman(npmovie, frames=None, figure=None):
     
-    x = npmovie.kalmanobj.positions[:,1]
-    y = npmovie.kalmanobj.positions[:,0]
-    s = npmovie.kalmanobj.speed
-    
-    cl = xy_trajectory(x,y,s)
+    if frames is None:
+        x = npmovie.kalmanobj.positions[:,1]
+        y = npmovie.kalmanobj.positions[:,0]
+        s = npmovie.kalmanobj.speed[:,0]
+
+    else:
+        x = npmovie.kalmanobj.positions[frames,1]
+        y = npmovie.kalmanobj.positions[frames,0]
+        s = npmovie.kalmanobj.speed[frames,0]
+        
+    cl = xy_trajectory(x,y,s,figure=figure)
     return cl
+    
+
     
 def xy_raw(npmovie, cl=None, colormap='jet', strobe=False, movie=None):
 
@@ -60,13 +100,13 @@ def xy_raw(npmovie, cl=None, colormap='jet', strobe=False, movie=None):
 
     return cl
 
-def xy_trajectory(x, y, z, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,1024), figure=1, colormap='jet'):
+def xy_trajectory(x, y, z, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,1024), figure=None, colormap='jet'):
     
     if norm is None:
         if colorcode == 's':
             norm = (0.02, .3)
     print colormap
-    cl = colorline.Colorline(xlim=xlim, ylim =xlim, norm=norm, colormap = colormap, figure=figure)
+    cl = colorline.Colorline(xlim=xlim, ylim =xlim, norm=norm, colormap = colormap, figure=figure, hide_colorbar=True)
     
     cl.colorline(x, y, z,linewidth=1)
     #pyplot.show()
@@ -76,28 +116,52 @@ def xy_trajectory(x, y, z, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,102
     
     
     
-def plot_movie_data(npmovie):
-    
-    cl = xy_kalman(npmovie)
+def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
+
+
+    frames = get_all_frames(npmovie)
+    cl = xy_kalman(npmovie, figure=figure, frames=frames)
     
     # get strobe image:
-    strobe_img = strobe_from_npmovie(npmovie)
+    strobe_img = strobe_from_npmovie(npmovie, interval=210, frames=frames)
     cl.ax0.imshow(strobe_img, pyplot.get_cmap('gray'))
     
-    interval = 100.
-    for i in range(len(npmovie.kalmanobj.positions)):
-        if int(i/interval) == i/interval:
-            center = npmovie.kalmanobj.positions[i]
-            long_axis = npmovie.kalmanobj.long_axis[i]
-                       
-            factor =  npmovie.obj.axis_ratio[i][0]*4.
-            factor = min(15., factor)
-            print i, factor
-            
-            dx = long_axis[1]*factor
-            dy = long_axis[0]*factor
+    interval = 70
+    i = frames[0]
+    while i < frames[-1]:
+    
+        # plot body orientation vector
+        center = npmovie.kalmanobj.positions[i]
+        long_axis = npmovie.kalmanobj.long_axis[i]
+                   
+        factor =  npmovie.obj.axis_ratio[i][0]*4.
+        factor = min(15., factor)
+        
+        dx = long_axis[1]*factor
+        dy = long_axis[0]*factor
+        
+        legs = npmovie.kalmanobj.legs[i]
+        if legs > legthresh:
             arrow = Arrow(center[1], center[0], dx, dy, width=1.0, color='r')
-            cl.ax0.add_artist(arrow)
+        else:
+            arrow = Arrow(center[1], center[0], dx, dy, width=1.0, color='b')
+    
+        cl.ax0.add_artist(arrow)
+        
+        if show_wings:
+            # plot wing orientation vectors
+            wingR = npmovie.kalmanobj.wingcenterR[i]
+            if not np.isnan(wingR[0]):
+                arrow = Arrow(center[1], center[0], wingR[1]-30, wingR[0]-30, width=1.0, color='b')
+                cl.ax0.add_artist(arrow)
+            
+            wingL = npmovie.kalmanobj.wingcenterL[i]
+            if not np.isnan(wingL[0]): 
+                arrow = Arrow(center[1], center[0], wingL[1]-30, wingL[0]-30, width=1.0, color='b')
+                cl.ax0.add_artist(arrow)
+        
+        
+        i += interval
             
     #plt.show()
     return cl
@@ -133,14 +197,19 @@ def plot_movie_dict(movie_dict, cl=None):
     #plt.show()
     return cl
     
-def strobe_from_npmovie(npmovie):
+def strobe_from_npmovie(npmovie, interval=200, frames=None):
 
     bkgrd = npmovie.background
     strobe_img = copy.copy(bkgrd)
     
-    interval = 10
     i = 0
-    while i < len(npmovie.uframes):
+    
+    if frames is None:
+        frames = np.arange(0,len(npmovie.uframes),interval)
+    else:
+        frames = np.arange(frames[0], frames[-1], interval)    
+    
+    for i in frames:
         if npmovie.uframes[i].uimg is not None:
             
             uimg = npmovie.uframes[i].uimg
@@ -152,8 +221,6 @@ def strobe_from_npmovie(npmovie):
             blank[indices[0]:indices[1], indices[2]:indices[3]] = uimg
             strobe_img = nim.darken(strobe_img, blank)
                 
-        i += interval
-        
     return strobe_img
     
 def plot_trajectory(movie_info, movie, strobe=True, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,1024), figure=None, colormap='jet'):
@@ -221,5 +288,116 @@ def pdf_landings(movie_info):
         
         
     
+############## wing kinematics  #####################
+
+def plot_wingbeat_frequency(npmovie):
+    frames = get_active_frames(npmovie)
     
+    waR = np.reshape(npmovie.kalmanobj.wingangleR[frames], (len(frames)))
+    interval = 1000
+
+    i = 0
+    seg = waR[i:i+interval]
+    sp = np.fft.fft(seg)
+    freq = np.fft.fftfreq(len(seg))
+    plt.plot(freq*npmovie.fps, np.abs(sp.real))
+    
+def plot_wingbeats(npmovie):
+
+    # REQUIRES that you have run sa1a.get_flydra_frame()
+    
+    frames = get_active_frames(npmovie)
+    t = np.array(frames)*1./npmovie.fps
+    
+    waR = np.reshape(npmovie.kalmanobj.wingangleR[frames], (len(frames)))
+    waL = np.reshape(npmovie.kalmanobj.wingangleL[frames], (len(frames)))
+     
+    plt.subplot(421)
+    plt.plot(t, waR)
+    plt.xlabel('time')
+    plt.ylabel('right wing angle (radians)')
+
+    plt.subplot(423)
+    plt.plot(t, waL)
+    plt.xlabel('time')
+    plt.ylabel('left wing angle (radians)')
+    
+    r = npmovie.kalmanobj.polarpos[frames][:,0]
+    theta = npmovie.kalmanobj.polarpos[frames][:,1]
+    
+    
+    z = np.zeros_like(r)
+    i = 0
+    for uframe in npmovie.uframes[frames[0]:frames[-1]]:
+        tmp = npmovie.trajec.positions[uframe.flydraframe,2] 
+        z[i] = tmp
+        i += 1
+            
+    plt.subplot(422)
+    plt.plot(t, r)
+    plt.xlabel('time')
+    plt.ylabel('fly position, dist to post, pixels')
+    
+    plt.subplot(424)
+    plt.plot(t, theta)
+    plt.xlabel('time')
+    plt.ylabel('angle to post, radians')
+    
+    if 1:
+        plt.subplot(426)
+        plt.plot(t, z)
+        plt.xlabel('time')
+        plt.ylabel('elevation, meters')
+        
+    plt.subplot(425)
+    plt.plot(t, npmovie.kalmanobj.legs[frames])
+    plt.xlabel('time')
+    plt.ylabel('leg extension, arb. units')
+    
+    plt.subplot(427)
+    plt.plot(t, npmovie.kalmanobj.axis_ratio[frames])
+    plt.xlabel('time')
+    plt.ylabel('body length ratio (pitch est.)')
+    
+    plt.subplot(428)
+    plt.plot(t, npmovie.kalmanobj.speed[frames])
+    plt.xlabel('time')
+    plt.ylabel('speed, pixels/second')
+    
+    plt.show()
+
+
+
+def pdf_movie_data(movie_dataset):
+    
+    # Initialize:
+    pp =  pdf.PdfPages('sa1_movies_2.pdf')
+    f = 0
+    
+    for key,mnpmovie in movie_dataset.items():
+        f += 1
+        cl = plot_movie_data(mnpmovie, show_wings=False, figure=f)
+        
+        try:
+            extras = mnpmovie.extras[0]
+        except:
+            extras = '' 
+        print mnpmovie.id, mnpmovie.behavior, extras
+        if extras == 'none':
+            extras = ''
+        title = mnpmovie.id + ' ' + mnpmovie.behavior + ' ' + extras
+        
+        plt.Figure.set_figsize_inches(cl.fig, [20,20])
+        plt.Figure.set_dpi(cl.fig, 300)
+        
+        cl.ax0.set_title(title)
+        pp.savefig(f)
+        plt.close(f)
+
+    # Once you are done, remember to close the object:
+    pp.close()
+    
+    
+    
+
     
