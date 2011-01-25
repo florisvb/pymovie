@@ -48,6 +48,7 @@ def process_movie(MOVIE_ID, movie_info=None):
         pm.segment_fly(npmovie)
         
         pm.calc_obj_pos(npmovie)
+        print npmovie.obj.positions.shape
         pm.calc_obj_motion(npmovie)
         
         
@@ -79,7 +80,7 @@ def process_movie(MOVIE_ID, movie_info=None):
             
         return npmovie
         
-def batch_process_harddrive(path='/media/SA1_movies_2/sa1_movies/', movie_dataset_filename = None, dataset=None):
+def batch_process_harddrive(path='/media/SA1_movies_3/sa1_movies/', movie_dataset_filename = None, dataset=None):
 
     
 
@@ -119,6 +120,6 @@ def batch_process_harddrive(path='/media/SA1_movies_2/sa1_movies/', movie_datase
 if __name__ == '__main__':        
 
     dataset = ap.initialize_dataset('/home/floris/data/windtunnel/SA1/dataset_all')
-    batch_process_harddrive(path='/media/SA1_movies_2/sa1_movies/', movie_dataset_filename = None, dataset=dataset)
+    batch_process_harddrive(path='/media/SA1_movies_3/sa1_movies/', movie_dataset_filename = None, dataset=dataset)
 
 

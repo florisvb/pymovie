@@ -407,11 +407,13 @@ class npMovie:
         if self.dynamic_tracking_mask is False and self.tracking_mask is not None:
             absdiff *= tracking_mask
             
-        print 'shape: ', np.shape(absdiff)
-        threshold = max( 10, absdiff.max() - THRESHRANGE )
-        print 'dynamic threshold: ', threshold 
+        absdiff = nim.auto_adjust_levels(absdiff)
+        #print 'shape: ', np.shape(absdiff)
+        #threshold = max( 10, absdiff.max() - THRESHRANGE )
+        #print 'dynamic threshold: ', threshold 
         
-        diffthresh = nim.threshold(absdiff, threshold)
+        #diffthresh = nim.threshold(absdiff, threshold)
+        diffthresh = nim.threshold(absdiff, 50, threshold_hi=255)
         blobs = nim.find_blobs(diffthresh, self.blob_size_range)
         
         if blobs is None:
