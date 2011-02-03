@@ -120,12 +120,31 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
 
 
     frames = get_all_frames(npmovie)
+    time = np.array(frames)*1/float(npmovie.fps)
     cl = xy_kalman(npmovie, figure=figure, frames=frames)
     
     # get strobe image:
     strobe_img = strobe_from_npmovie(npmovie, interval=210, frames=frames)
     cl.ax0.imshow(strobe_img, pyplot.get_cmap('gray'))
     
+    
+    # axis parameters for subplots
+    nticks = 5
+    
+    # subplot parameters
+    n = 4
+    h = (0.7-.05*(n-1))/float(n)
+    
+    subplots = []
+    
+    for s in range(n):
+        ax = cl.fig.add_axes([0.71,0.1+(h+.05)*s,0.2,h])
+        subplots.append(ax)
+    
+    xticks = np.linspace(0, 1, num=nticks, endpoint=True).tolist()
+    subplots[0].plot(time, npmovie.flycoord.postangle[frames])
+    subplots[0].set_xticks(xticks)
+
     interval = 70
     i = frames[0]
     while i < frames[-1]:
