@@ -106,7 +106,7 @@ def xy_trajectory(x, y, z, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,102
         if colorcode == 's':
             norm = (0.02, .3)
     print colormap
-    cl = colorline.Colorline(xlim=xlim, ylim =xlim, norm=norm, colormap = colormap, figure=figure, hide_colorbar=True)
+    cl = colorline.Colorline(xlim=xlim, ylim =xlim, norm=norm, colormap = colormap, figure=figure) #, hide_colorbar=True
     
     cl.colorline(x, y, z,linewidth=1)
     #pyplot.show()
@@ -119,7 +119,8 @@ def xy_trajectory(x, y, z, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,102
 def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
 
 
-    frames = get_all_frames(npmovie)
+    all_frames = get_all_frames(npmovie)
+    frames = all_frames[50:-1]
     time = np.array(frames)*1/float(npmovie.fps)
     cl = xy_kalman(npmovie, figure=figure, frames=frames)
     
@@ -129,11 +130,12 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
     
     
     # axis parameters for subplots
-    nticks = 5
+    nxticks = 5
+    nyticks = 3
     
     # subplot parameters
-    n = 4
-    h = (0.7-.05*(n-1))/float(n)
+    n = 7
+    h = (0.7-.05*(n-2))/float(n)
     
     subplots = []
     
@@ -141,9 +143,66 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
         ax = cl.fig.add_axes([0.71,0.1+(h+.05)*s,0.2,h])
         subplots.append(ax)
     
-    xticks = np.linspace(0, 1, num=nticks, endpoint=True).tolist()
-    subplots[0].plot(time, npmovie.flycoord.postangle[frames])
-    subplots[0].set_xticks(xticks)
+    xticks = np.linspace(0, 1, num=nxticks, endpoint=True).tolist()
+    
+    p = 0
+    subplots[p].plot(time, npmovie.flycoord.worldangle[frames])
+    subplots[p].set_xticks(xticks)
+    default_yticks = subplots[p].get_yticks()
+    yticks = np.linspace(default_yticks[0], default_yticks[-1], nyticks, endpoint=True).tolist()
+    subplots[p].set_yticks(yticks)
+    subplots[p].set_xlabel('time, seconds')
+    subplots[p].set_ylabel('world angle')
+    
+    p += 1
+    subplots[p].plot(time, npmovie.flycoord.postangle[frames])
+    subplots[p].set_xticks(xticks)
+    default_yticks = subplots[p].get_yticks()
+    yticks = np.linspace(default_yticks[0], default_yticks[-1], nyticks, endpoint=True).tolist()
+    subplots[p].set_yticks(yticks)
+    subplots[p].set_xlabel('time, seconds')
+    subplots[p].set_ylabel('angle to post')
+    
+    p += 1
+    subplots[p].plot(time, npmovie.flycoord.slipangle[frames])
+    subplots[p].set_xticks(xticks)
+    default_yticks = subplots[p].get_yticks()
+    yticks = np.linspace(default_yticks[0], default_yticks[-1], nyticks, endpoint=True).tolist()
+    subplots[p].set_yticks(yticks)
+    subplots[p].set_ylabel('slip angle')
+    
+    p += 1
+    subplots[p].plot(time, npmovie.flycoord.velocities[frames,0])
+    subplots[p].set_xticks(xticks)
+    default_yticks = subplots[p].get_yticks()
+    yticks = np.linspace(default_yticks[0], default_yticks[-1], nyticks, endpoint=True).tolist()
+    subplots[p].set_yticks(yticks)
+    subplots[p].set_ylabel('forward vel')
+    
+    p += 1
+    subplots[p].plot(time, npmovie.flycoord.velocities[frames,1])
+    subplots[p].set_xticks(xticks)
+    default_yticks = subplots[p].get_yticks()
+    yticks = np.linspace(default_yticks[0], default_yticks[-1], nyticks, endpoint=True).tolist()
+    subplots[p].set_yticks(yticks)
+    subplots[p].set_ylabel('sideways vel')
+    
+    p += 1
+    subplots[p].plot(time, npmovie.kalmanobj.legs[frames])
+    subplots[p].set_xticks(xticks)
+    default_yticks = subplots[p].get_yticks()
+    yticks = np.linspace(default_yticks[0], default_yticks[-1], nyticks, endpoint=True).tolist()
+    subplots[p].set_yticks(yticks)
+    subplots[p].set_ylabel('leg extension')
+    
+    p += 1
+    subplots[p].plot(time, npmovie.flycoord.dist_to_post[frames])
+    subplots[p].set_xticks(xticks)
+    default_yticks = subplots[p].get_yticks()
+    yticks = np.linspace(default_yticks[0], default_yticks[-1], nyticks, endpoint=True).tolist()
+    subplots[p].set_yticks(yticks)
+    subplots[p].set_ylabel('dist to post')
+    
 
     interval = 70
     i = frames[0]
@@ -387,7 +446,7 @@ def plot_wingbeats(npmovie):
 
 
 
-def pdf_movie_data(movie_dataset):
+def pdf_movie_data(movie_dataset, scale = 10):
     
     # Initialize:
     pp =  pdf.PdfPages('sa1_movies_2.pdf')
@@ -406,8 +465,8 @@ def pdf_movie_data(movie_dataset):
             extras = ''
         title = mnpmovie.id + ' ' + mnpmovie.behavior + ' ' + extras
         
-        plt.Figure.set_figsize_inches(cl.fig, [20,20])
-        plt.Figure.set_dpi(cl.fig, 300)
+        plt.Figure.set_figsize_inches(cl.fig, [2*scale,1*scale])
+        plt.Figure.set_dpi(cl.fig, 72)
         
         cl.ax0.set_title(title)
         pp.savefig(f)

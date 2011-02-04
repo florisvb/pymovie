@@ -34,6 +34,7 @@ def calc_fly_coordinates(npmovie, post_pos = [512, 512]):
     npmovie.flycoord.heading = np.zeros_like(npmovie.kalmanobj.long_axis)
     npmovie.flycoord.slipangle = np.zeros_like(npmovie.kalmanobj.speed)
     npmovie.flycoord.postangle = np.zeros_like(npmovie.kalmanobj.speed)
+    npmovie.flycoord.worldangle = np.zeros_like(npmovie.kalmanobj.speed)
     npmovie.flycoord.speed = npmovie.kalmanobj.speed
     npmovie.flycoord.dist_to_post = np.zeros_like(npmovie.kalmanobj.speed)
     
@@ -42,11 +43,15 @@ def calc_fly_coordinates(npmovie, post_pos = [512, 512]):
         npmovie.kalmanobj.short_axis[i,0] = npmovie.kalmanobj.long_axis[i,1]
         npmovie.kalmanobj.short_axis[i,1] = npmovie.kalmanobj.long_axis[i,0]*-1
         
+        npmovie.flycoord.worldangle[i] = np.arctan2(npmovie.kalmanobj.long_axis[i,1], npmovie.kalmanobj.long_axis[i,0]) # want angle between 0 and 360 deg
+        if npmovie.flycoord.worldangle[i] < 0:
+            npmovie.flycoord.worldangle[i] = np.pi*2+npmovie.flycoord.worldangle[i]
+        
         npmovie.flycoord.heading[i] = npmovie.kalmanobj.velocities[i] / np.linalg.norm( npmovie.kalmanobj.velocities[i] )
         cosslipangle = np.dot(npmovie.flycoord.heading[i], npmovie.kalmanobj.long_axis[i]) / (np.linalg.norm(npmovie.flycoord.heading[i])*np.linalg.norm(npmovie.kalmanobj.long_axis[i])) 
         npmovie.flycoord.slipangle[i] = np.arccos(cosslipangle)
         vec_to_post = post_pos - npmovie.kalmanobj.positions[i]
-        npmovie.flycoord.dist_to_post = np.linalg.norm(vec_to_post)
+        npmovie.flycoord.dist_to_post[i] = np.linalg.norm(vec_to_post)
         cospostangle = np.dot(vec_to_post, npmovie.kalmanobj.long_axis[i]) / ( np.linalg.norm(vec_to_post)*np.linalg.norm(npmovie.kalmanobj.long_axis[i]) )
         npmovie.flycoord.postangle[i] = np.arccos(cospostangle)
             

@@ -1,6 +1,7 @@
 import sys
 
 sys.path.append('/home/floris/src/adskalman')
+sys.path.append('/home/floris/src/analysis')
 
 import matplotlib.pyplot as plt
 import numpy
