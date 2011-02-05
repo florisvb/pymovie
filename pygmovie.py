@@ -270,14 +270,31 @@ def calc_obj_motion(npmovie):
         npmovie.kalmanobj.speed[i] = np.linalg.norm(v)
     
     # need to fix/smooth missing angles
-    
+    for i in range(len(npmovie.kalmanobj.indices)):
+        frame = indices[i]
+        npmovie.kalmanobj.long_axis[frame] = npmovie.obj.long_axis[frame] / np.linalg.norm(npmovie.obj.long_axis[frame])
+    for i in range(1,len(npmovie.kalmanobj.indices)):
+        frame = indices[i]
+        if npmovie.kalmanobj.long_axis[frame][0] == 1:
+            
+            future_axis = 1
+            future_frame = frame
+            while future_axis == 1:
+                future_frame += 1
+                if future_frame > len(npmovie.kalmanobj.indices):
+                    future_frame = frame
+                future_axis = npmovie.kalmanobj.long_axis[future_frame][0]
+            
+            delta_axis = (npmovie.kalmanobj.long_axis[future_frame] - npmovie.kalmanobj.long_axis[frame-1]) / float(future_frame- (frame-1) )
+            
+            npmovie.kalmanobj.long_axis[frame] = npmovie.kalmanobj.long_axis[frame-1] + delta_axis
+            
+        
     
     # fix angle orientation:
     if 1:
         switching_threshold = 0.004
         for i in range(len(npmovie.kalmanobj.indices)):
-            frame = indices[i]
-            npmovie.kalmanobj.long_axis[frame] = npmovie.obj.long_axis[frame] / np.linalg.norm(npmovie.obj.long_axis[frame])
             
             # find the value of orienting the body with velocity
             value_new = np.dot(npmovie.kalmanobj.velocities[frame], npmovie.obj.long_axis[frame])
