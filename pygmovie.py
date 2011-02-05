@@ -283,6 +283,7 @@ def calc_obj_motion(npmovie):
                 future_frame += 1
                 if future_frame > len(npmovie.kalmanobj.indices):
                     future_frame = frame
+                    break
                 future_axis = npmovie.kalmanobj.long_axis[future_frame][0]
             
             delta_axis = (npmovie.kalmanobj.long_axis[future_frame] - npmovie.kalmanobj.long_axis[frame-1]) / float(future_frame- (frame-1) )
