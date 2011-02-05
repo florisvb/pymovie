@@ -45,7 +45,7 @@ def calc_fly_coordinates(npmovie, post_pos = [512, 512]):
         
         npmovie.flycoord.worldangle[i] = np.arctan2(npmovie.kalmanobj.long_axis[i,1], npmovie.kalmanobj.long_axis[i,0]) # want angle between 0 and 360 deg
         if npmovie.flycoord.worldangle[i] < 0:
-            npmovie.flycoord.worldangle[i] = np.pi*2+npmovie.flycoord.worldangle[i]
+            npmovie.flycoord.worldangle[i] = (np.pi*2+.001)+npmovie.flycoord.worldangle[i]
         
         npmovie.flycoord.heading[i] = npmovie.kalmanobj.velocities[i] / np.linalg.norm( npmovie.kalmanobj.velocities[i] )
         cosslipangle = np.dot(npmovie.flycoord.heading[i], npmovie.kalmanobj.long_axis[i]) / (np.linalg.norm(npmovie.flycoord.heading[i])*np.linalg.norm(npmovie.kalmanobj.long_axis[i])) 
@@ -58,4 +58,10 @@ def calc_fly_coordinates(npmovie, post_pos = [512, 512]):
     npmovie.flycoord.velocities = rotate_coordinates(npmovie.kalmanobj.velocities, npmovie.kalmanobj.long_axis, npmovie.kalmanobj.short_axis)
     
 
-
+def calc_fly_coordinates_dataset(movie_dataset):
+    
+    for key,mnpmovie in movie_dataset.items():
+        calc_fly_coordinates(mnpmovie)
+    
+    
+    

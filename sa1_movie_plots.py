@@ -106,7 +106,7 @@ def xy_trajectory(x, y, z, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,102
         if colorcode == 's':
             norm = (0.02, .3)
     print colormap
-    cl = colorline.Colorline(xlim=xlim, ylim =xlim, norm=norm, colormap = colormap, figure=figure) #, hide_colorbar=True
+    cl = colorline.Colorline(xlim=xlim, ylim =xlim, norm=norm, colormap = colormap, figure=figure, hide_colorbar=True)
     
     cl.colorline(x, y, z,linewidth=1)
     #pyplot.show()
@@ -120,7 +120,7 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
 
 
     all_frames = get_all_frames(npmovie)
-    frames = all_frames[50:-1]
+    frames = all_frames[100:-100]
     time = np.array(frames)*1/float(npmovie.fps)
     cl = xy_kalman(npmovie, figure=figure, frames=frames)
     
@@ -449,7 +449,7 @@ def plot_wingbeats(npmovie):
 def pdf_movie_data(movie_dataset, scale = 10):
     
     # Initialize:
-    pp =  pdf.PdfPages('sa1_movies_2.pdf')
+    pp =  pdf.PdfPages('sa1_movies_2_test.pdf')
     f = 0
     
     for key,mnpmovie in movie_dataset.items():

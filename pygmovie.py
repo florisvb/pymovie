@@ -269,7 +269,10 @@ def calc_obj_motion(npmovie):
     for i, v in enumerate(npmovie.kalmanobj.velocities):
         npmovie.kalmanobj.speed[i] = np.linalg.norm(v)
     
-    # fix angles:
+    # need to fix/smooth missing angles
+    
+    
+    # fix angle orientation:
     if 1:
         switching_threshold = 0.004
         for i in range(len(npmovie.kalmanobj.indices)):
