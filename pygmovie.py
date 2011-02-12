@@ -104,7 +104,6 @@ def calc_absdiff(npmovie):
             if uframe.uimg.shape != bkgrd_uimg.shape:
                 uframe.absdiff = np.zeros_like(uframe.uimg)
             else:
-                print 'good'
                 uframe.absdiff = nim.absdiff(uframe.uimg, bkgrd_uimg)
             #except:
             #    
@@ -173,19 +172,27 @@ def find_object(img, thresholds, sizerange, dist_thresh, erode=False, check_cent
                         
 def segment_fly(npmovie):
 
+    try:
+        np.sum(npmovie.uframes[0].uimg_adj)
+    except:
+        calc_absdiff(npmovie)
+        auto_adjust_uimg(npmovie)
     npmovie.obj.legs = np.zeros(len(npmovie.uframes))
-
+    npmovie.obj.bool = np.zeros(len(npmovie.uframes))
+    npmovie.obj.wing_bool = np.zeros(len(npmovie.uframes))
     for i in range(len(npmovie.uframes)):
         uframe = npmovie.uframes[i]
         if uframe.uimg is not None:
             body = find_object(uframe.uimg_adj, [150,253], [100,400], 10, check_centers=False)
             uframe.body = copy.copy(body)
+            npmovie.obj.bool[i] = np.sum(uframe.body)/255.
             
             raw_wing_img = copy.copy(uframe.uimg_adj)
             body = binary_dilation(body)
             raw_wing_img[body>0] = 255
             wings = find_object(raw_wing_img, [30,140], [15,400], 17, erode=1, check_centers=False)
             uframe.wings = copy.copy(wings)
+            npmovie.obj.wing_bool[i] = np.sum(uframe.wings)/255.
             
             if 1:
                 raw_leg_img = copy.copy(uframe.uimg_adj)
@@ -217,7 +224,28 @@ def smooth_legs(npmovie, clipping_radius=7, smoothing_radius=200):
 #################################
 #################################
 
-
+def interpolate(Array, values):
+    # this function will run through the array, and replace any EXACT instances of the values given with linear interpolations from the array
+    array = copy.copy(Array)
+    if type(values) is not list:
+        values = [values]
+    
+    for i in range(1,len(array)):
+        
+        if array[i] in values:
+            future_val = values[0]
+            future_i = i
+            while future_val in values:
+                future_i += 1
+                if future_i >= len(array):
+                    future_i = i
+                    break
+                future_val = array[future_i]
+            delta_val = (array[future_i] - array[i-1]) / float(future_i- (i-1) )
+            
+            array[i] = array[i-1] + delta_val
+    
+    return array        
 
 
 ############################################################################################
@@ -245,15 +273,17 @@ def calc_obj_motion(npmovie):
     Q = 0.0001*numpy.eye(ss) # process noise
     R = 100*numpy.eye(os) # observation noise
     
-    raw_x = np.nan_to_num(npmovie.obj.positions[:,0])
+    interpolated_positions_0 = interpolate(npmovie.obj.positions[:,0], 0)
+    interpolated_positions_1 = interpolate(npmovie.obj.positions[:,1], 0)
+    
+    raw_x = np.nan_to_num(interpolated_positions_0)
     indices = np.nonzero(raw_x)[0].tolist()
     raw_x = raw_x[indices]
     
-    raw_y = np.nan_to_num(npmovie.obj.positions[:,1])
+    raw_y = np.nan_to_num(interpolated_positions_1)
     raw_y = raw_y[indices]
     
     y = np.vstack( (raw_x, raw_y) ).T
-    print y.shape, raw_x.shape, raw_y.shape
     initx = numpy.array([y[0,0], y[0,1],0,0],dtype=numpy.float)
     initV = 0*numpy.eye(ss)
 
@@ -261,13 +291,14 @@ def calc_obj_motion(npmovie):
 
     npmovie.kalmanobj.positions[indices] = xsmooth[:,0:2]
     npmovie.kalmanobj.velocities[indices] = xsmooth[:,2:4]
-    npmovie.kalmanobj.timestamps = [npmovie.uframes[i].timestamp for i in indices]
+    npmovie.kalmanobj.timestamps = [copy.copy(npmovie.uframes[i].timestamp) for i in indices]
     npmovie.kalmanobj.indices = indices
     npmovie.kalmanobj.errors = Vsmooth
     
     npmovie.kalmanobj.speed = np.zeros([len(npmovie.uframes), 1])
     for i, v in enumerate(npmovie.kalmanobj.velocities):
         npmovie.kalmanobj.speed[i] = np.linalg.norm(v)
+        
     
     # need to fix/smooth missing angles
     for i in range(len(npmovie.kalmanobj.indices)):
@@ -275,13 +306,12 @@ def calc_obj_motion(npmovie):
         npmovie.kalmanobj.long_axis[frame] = npmovie.obj.long_axis[frame] / np.linalg.norm(npmovie.obj.long_axis[frame])
     for i in range(1,len(npmovie.kalmanobj.indices)):
         frame = indices[i]
-        if npmovie.kalmanobj.long_axis[frame][0] == 1:
-            
+        if npmovie.kalmanobj.long_axis[frame][0] == 1 or npmovie.kalmanobj.long_axis[frame][1] == 0:
             future_axis = 1
             future_frame = frame
             while future_axis == 1:
                 future_frame += 1
-                if future_frame > len(npmovie.kalmanobj.indices):
+                if future_frame > npmovie.kalmanobj.indices[-1]:
                     future_frame = frame
                     break
                 future_axis = npmovie.kalmanobj.long_axis[future_frame][0]
@@ -293,24 +323,44 @@ def calc_obj_motion(npmovie):
         
     
     # fix angle orientation:
+    # flies don't spin around immediately, so generally body angle should be rouhgly the same from frame to frame, at least within 180 deg
+    npmovie.obj.dot_prev_ori = np.zeros(len(npmovie.kalmanobj.indices))
+    npmovie.obj.dot_vel = np.zeros(len(npmovie.kalmanobj.indices))
+    
     if 1:
-        switching_threshold = 0.004
-        for i in range(len(npmovie.kalmanobj.indices)):
+        npmovie.kalmanobj.long_axis[0] = npmovie.obj.long_axis[0]
+        for i in range(1,len(npmovie.kalmanobj.indices)):
             
-            # find the value of orienting the body with velocity
-            value_new = np.dot(npmovie.kalmanobj.velocities[frame], npmovie.obj.long_axis[frame])
-            if value_new < 0:
-                npmovie.obj.long_axis[frame] *= -1
-                value_new = np.dot(npmovie.kalmanobj.velocities[frame], npmovie.obj.long_axis[frame])
-            
-            value_prev = np.dot(npmovie.kalmanobj.velocities[frame], npmovie.kalmanobj.long_axis[frame-1])
-
-            print 'values: ', value_new, value_prev, switching_threshold
-
-            if value_new > value_prev-switching_threshold:
-                npmovie.kalmanobj.long_axis[frame] = npmovie.obj.long_axis[frame]
+            if i < 2:
+                switching_threshold = 0
             else:
-                npmovie.kalmanobj.long_axis[frame] = npmovie.kalmanobj.long_axis[frame-1]
+                switching_threshold = 0.2                
+        
+            frame = indices[i]
+    
+            dot_prev_ori = np.dot(npmovie.kalmanobj.long_axis[frame-1], npmovie.obj.long_axis[frame])
+            dot_vel = np.dot(npmovie.kalmanobj.velocities[frame], npmovie.obj.long_axis[frame])
+            
+            npmovie.obj.dot_prev_ori[i] = dot_prev_ori
+            npmovie.obj.dot_vel[i] = dot_vel
+            
+            direction = 1.
+
+            if dot_vel < 0 and np.abs(dot_vel) > switching_threshold:
+                direction = -1
+            else:
+                if dot_prev_ori < 0: # not aligned with previous frame by > 90 deg
+                    direction = -1
+                    
+                    if dot_vel < 0: # orientation not aligned with velocity
+                        if np.abs(dot_vel) > switching_threshold:
+                            direction = -1
+                    if dot_vel > 0: # orientation is aligned with velocity, but not with prev ori
+                        if np.abs(dot_vel) > switching_threshold:
+                            direction = 1
+                        
+                                
+            npmovie.kalmanobj.long_axis[frame] = npmovie.obj.long_axis[frame]*direction
             
     return npmovie
 
@@ -607,6 +657,10 @@ class MiniNPM:
         self.background = copy.copy(npmovie.background)
         self.obj = copy.copy(npmovie.obj)
         self.kalmanobj = copy.copy(npmovie.kalmanobj)
+        try:
+            self.flycoord = copy.copy(npmovie.flycoord)
+        except:
+            pass
         self.fps = copy.copy(npmovie.fps)
         self.trajec = copy.copy(npmovie.trajec)
         try:
@@ -627,6 +681,8 @@ class MiniNPM:
             except:
                 self.uframes[i].flydraframe = self.uframes[i-1].flydraframe
                 uframe.indices = None
+                
+
     
                 
 if __name__ == '__main__':

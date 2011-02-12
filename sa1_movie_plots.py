@@ -21,34 +21,19 @@ from matplotlib.patches import Arc
 import numpyimgproc as nim
 import pickle
 import pygmovie as pm
+import classification as clas
 
 import copy
 
 def get_active_frames(npmovie):
     # series of frames where position is not (0,0)
-
-    p = 0
-    f = 0
-    interval = 10
-    while p < 1:
-        f += 1
-        tmp = [np.sum(npmovie.kalmanobj.positions[ff]) for ff in range(f,f+interval)]
-        p = np.min( tmp )
-    start = f
-    
-    p = 2
-    f = start
-    interval = 2
-    while p > 1:
-        f += 1
-        if f+interval > len(npmovie.uframes)-1:
-            break
-        tmp = [np.sum(npmovie.kalmanobj.positions[ff]) for ff in range(f,f+interval)]
-        p = np.min( tmp )
-    stop = f
+    try: 
+        frame_of_landing = npmovie.frame_of_landing
+    except:
+        frame_of_landing = -1
         
-    active_range = np.arange(start, stop).tolist()
-    return active_range
+    frames = np.nonzero(npmovie.obj.bool[0:frame_of_landing] > 100)[0].tolist()
+    return frames
     
 def get_all_frames(npmovie):
     
@@ -117,10 +102,9 @@ def xy_trajectory(x, y, z, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,102
     
     
 def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
-
-
-    all_frames = get_all_frames(npmovie)
-    frames = all_frames[100:-100]
+    calc_frame_of_landing(npmovie)
+    frames = get_active_frames(npmovie)
+    print frames
     time = np.array(frames)*1/float(npmovie.fps)
     cl = xy_kalman(npmovie, figure=figure, frames=frames)
     
@@ -476,6 +460,80 @@ def pdf_movie_data(movie_dataset, scale = 10):
     pp.close()
     
     
+def reprocess_movies(movie_dataset, name=None, save=False):
+    new_movie_dataset = {}
+    for key,npmovie in movie_dataset.items():
+        print 'processing: ', key
+        
+        pm.segment_fly(npmovie)
+        pm.calc_obj_motion(npmovie)
+        pm.smooth_legs(npmovie)
+        
+        mnpmovie = pm.MiniNPM(npmovie)
+        mnpmovie.behavior = copy.copy(npmovie.behavior)
+        mnpmovie.path = copy.copy(npmovie.path)
+        mnpmovie.posttype = copy.copy(npmovie.posttype)
+        mnpmovie.extras = copy.copy(npmovie.extras)
+        mnpmovie.id = copy.copy(npmovie.id)
+        npmovie = None
+        
+        new_movie_dataset.setdefault(mnpmovie.id, mnpmovie)
+        
+    if save:
+        if name is None:
+            name = 'sa1_movie_dataset_2_repro'
+        pm.save(new_movie_dataset, name)
+            
+    return new_movie_dataset
+        
+def recalc_motion_movies(movie_dataset):
+    for key,npmovie in movie_dataset.items():
+        pm.calc_obj_motion(npmovie)
+        pm.smooth_legs(npmovie)
+        clas.calc_fly_coordinates(npmovie)
+        calc_frame_of_landing(npmovie)
+        
+        
+        
+def calc_frame_of_landing(npmovie, threshold = 100.):
+    frames = np.nonzero(npmovie.obj.bool > 20)[0].tolist()
     
+    # if not landing behavior, return last frame as safety:
+    if npmovie.behavior != 'landing':
+        npmovie.frame_of_landing = frames[-1]
+        print 'not landing'
+        return npmovie.frame_of_landing
+    
+    # if landing, find frame where speed is below a threshold
+    n_frames_landed = 0
+    landing_frame = None
+    for frame in frames[10:]:
+        if npmovie.obj.wing_bool[frame] > threshold:
+            n_frames_landed = 0
+            landing_frame = None
+        if npmovie.obj.wing_bool[frame] < threshold:
+            if landing_frame is None:
+                landing_frame = frame
+            n_frames_landed += 1
+        if n_frames_landed >= 50:
+            npmovie.frame_of_landing = frame
+            return npmovie.frame_of_landing
+    
+    
+def calc_timestamps(npmovie):
+    npmovie.timestamps = np.arange(0.,float(len(npmovie.uframes)), 1.)
+    npmovie.timestamps *= 1./float(npmovie.fps)
+
+def timestamp2frame(npmovie, timestamp):
+    return float(npmovie.fps)*timestamp
+        
+        
+        
+        
+        
+        
+        
+        
+        
 
     
