@@ -22,6 +22,7 @@ import numpyimgproc as nim
 import pickle
 import pygmovie as pm
 import classification as clas
+import sa1_analysis as sa1
 
 import copy
 
@@ -32,8 +33,13 @@ def get_active_frames(npmovie):
     except:
         frame_of_landing = -1
         
-    frames = np.nonzero(npmovie.obj.bool[0:frame_of_landing] > 100)[0].tolist()
-    return frames
+    frames = np.nonzero(npmovie.obj.bool[0:frame_of_landing] > 100)[0]
+    
+    framediff = np.diff(frames)==1
+    blobs = nim.find_biggest_blob(framediff)
+    contframes = frames[ np.where(blobs==1)[0].tolist() ].tolist()
+
+    return contframes
     
 def get_all_frames(npmovie):
     
@@ -468,14 +474,22 @@ def reprocess_movies(movie_dataset, name=None, save=False):
         pm.segment_fly(npmovie)
         pm.calc_obj_motion(npmovie)
         pm.smooth_legs(npmovie)
+        clas.calc_fly_coordinates(npmovie)
+        calc_frame_of_landing(npmovie)
+        calc_timestamps(npmovie)
         
+        try:
+            align_sa1_flydra(npmovie)
+        except:
+            pass
+            
         mnpmovie = pm.MiniNPM(npmovie)
         mnpmovie.behavior = copy.copy(npmovie.behavior)
         mnpmovie.path = copy.copy(npmovie.path)
         mnpmovie.posttype = copy.copy(npmovie.posttype)
         mnpmovie.extras = copy.copy(npmovie.extras)
         mnpmovie.id = copy.copy(npmovie.id)
-        npmovie = None
+        del(npmovie)
         
         new_movie_dataset.setdefault(mnpmovie.id, mnpmovie)
         
@@ -492,8 +506,6 @@ def recalc_motion_movies(movie_dataset):
         pm.smooth_legs(npmovie)
         clas.calc_fly_coordinates(npmovie)
         calc_frame_of_landing(npmovie)
-        
-        
         
 def calc_frame_of_landing(npmovie, threshold = 100.):
     frames = np.nonzero(npmovie.obj.bool > 20)[0].tolist()
@@ -527,13 +539,58 @@ def calc_timestamps(npmovie):
 def timestamp2frame(npmovie, timestamp):
     return float(npmovie.fps)*timestamp
         
-        
-        
-        
-        
-        
-        
-        
+#def align_sa1_flydra_fmin_func(dataset1, dataset2, index):
+    
+def interp_flydra_data_to_sa1(npmovie, data):
+    flydra_raw_data = data
+    flydra_raw_time = npmovie.trajec.fly_time
+    flydra_interpolated_time = np.arange(flydra_raw_time[0], flydra_raw_time[-1], 1./float(npmovie.fps) )
+    flydra_data = np.interp( flydra_interpolated_time, flydra_raw_time, flydra_raw_data )
+    
+    return flydra_data
+    
+def interp_sa1_data_to_flydra(npmovie, data, frames):
+    sa1_raw_data = data
+    sa1_raw_time = npmovie.timestamps[frames]
+    sa1_interpolated_time = np.arange(sa1_raw_time[0], sa1_raw_time[-1], 1./float(100.) )
+    sa1_data = np.interp( sa1_interpolated_time, sa1_raw_time, sa1_raw_data )
+    
+    return sa1_data
+    
+def convolve(a1, a2):
+    
+    if len(a1) > len(a2):
+        along = a1
+        ashort = a2
+    else:
+        along = a2
+        ashort = a1
+    
+    conv = np.zeros( [len(along)-len(ashort)] )
+    for i in range(len(conv)):    
+        conv[i] = 1/np.sum(np.abs(along[i:i+len(ashort)] - ashort))
+    
+    return conv
+    
+    
+def align_sa1_flydra(npmovie, plot=False):
+    frames = get_active_frames(npmovie)
+     
+         
+    sa1_data = np.diff(interp_sa1_data_to_flydra(npmovie, npmovie.flycoord.dist_to_post[frames].T[0], frames))
+    flydra_data = np.diff(npmovie.trajec.dist_to_stim_r + npmovie.trajec.stimulus.radius)
+    conv = convolve(sa1_data/sa1_data.max(), flydra_data/flydra_data.max())
+    npmovie.sa1_start_index = np.argmax(conv)
+            
+    if plot:
+        plt.plot(conv/np.max(conv))
+        plt.plot(flydra_data/flydra_data.max())
+        t = np.arange(npmovie.sa1_start_index, npmovie.sa1_start_index+len(sa1_data), 1)
+        plt.plot(t, sa1_data/sa1_data.max()) 
+            
         
 
+    
+    
+    
     

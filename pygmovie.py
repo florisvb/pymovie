@@ -246,6 +246,8 @@ def interpolate(Array, values):
             array[i] = array[i-1] + delta_val
     
     return array        
+    
+
 
 
 ############################################################################################
@@ -661,8 +663,14 @@ class MiniNPM:
             self.flycoord = copy.copy(npmovie.flycoord)
         except:
             pass
+        try:
+            self.sa1_start_index = copy.copy(npmovie.sa1_start_index)
+        except:
+            pass
+            
         self.fps = copy.copy(npmovie.fps)
         self.trajec = copy.copy(npmovie.trajec)
+        self.timestamps = copy.copy(npmovie.timestamps)
         try:
             self.dataset_id = copy.copy(npmovie.dataset_id)
         except:
@@ -682,7 +690,6 @@ class MiniNPM:
                 self.uframes[i].flydraframe = self.uframes[i-1].flydraframe
                 uframe.indices = None
                 
-
     
                 
 if __name__ == '__main__':
