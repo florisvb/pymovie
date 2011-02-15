@@ -1,8 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-import psychopy as psy
-
 import scipy.optimize
 from scipy.ndimage.measurements import center_of_mass
 import scipy.ndimage as ndimage
@@ -68,17 +66,6 @@ def auto_adjust_levels(img):
         img3 = img2
         
     return img3
-    
-def smooth(img, freq=0.5):
-
-    size = img.shape
-    imgf = psy.imfft(img)
-    butter_filter = psy.butter2d_lp(size, freq, n=1)
-
-    imgf_filtered = imgf*butter_filter
-    img_filtered = psy.imifft(imgf_filtered)
-    
-    return img_filtered
     
 def find_blobs(img, sizerange=[0,inf], aslist=False):
     blobs, nblobs = ndimage.label(img)
