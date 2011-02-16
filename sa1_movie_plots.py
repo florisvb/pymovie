@@ -24,6 +24,8 @@ import pygmovie as pm
 import classification as clas
 import sa1_analysis as sa1
 
+import scipy.misc
+
 import copy
 
 def get_active_frames(npmovie):
@@ -58,14 +60,12 @@ def load(filename):
 def xy_kalman(npmovie, frames=None, figure=None):
     
     if frames is None:
-        x = npmovie.kalmanobj.positions[:,1]
-        y = npmovie.kalmanobj.positions[:,0]
-        s = npmovie.kalmanobj.speed[:,0]
+        frames = get_all_frames(npmovie)
 
-    else:
-        x = npmovie.kalmanobj.positions[frames,1]
-        y = npmovie.kalmanobj.positions[frames,0]
-        s = npmovie.kalmanobj.speed[frames,0]
+    posrot = sa1_to_flydra_data_transform(npmovie.kalmanobj.positions[frames,:], fix_sign=True)
+    x = posrot[:,0]
+    y = posrot[:,1]
+    s = npmovie.kalmanobj.speed[frames,0]
         
     cl = xy_trajectory(x,y,s,figure=figure)
     return cl
@@ -116,7 +116,8 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
     
     # get strobe image:
     strobe_img = strobe_from_npmovie(npmovie, interval=210, frames=frames)
-    cl.ax0.imshow(strobe_img, pyplot.get_cmap('gray'))
+    strobe_img = nim.rotate_image(strobe_img, np.array([[0,1],[-1,0]]))
+    cl.ax0.imshow(strobe_img, pyplot.get_cmap('gray'), origin='lower')
     
     
     # axis parameters for subplots
@@ -199,8 +200,8 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
     while i < frames[-1]:
     
         # plot body orientation vector
-        center = npmovie.kalmanobj.positions[i]
-        long_axis = npmovie.kalmanobj.long_axis[i]
+        center = sa1_to_flydra_data_transform(npmovie.kalmanobj.positions[i], fix_sign=True)
+        long_axis = sa1_to_flydra_img_transform(npmovie.kalmanobj.long_axis[i], fix_sign=False)*-1
                    
         factor =  npmovie.obj.axis_ratio[i][0]*4.
         factor = min(15., factor)
@@ -210,9 +211,9 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
         
         legs = npmovie.kalmanobj.legs[i]
         if legs > legthresh:
-            arrow = Arrow(center[1], center[0], dx, dy, width=1.0, color='r')
+            arrow = Arrow(center[0], center[1], dx, dy, width=1.0, color='r')
         else:
-            arrow = Arrow(center[1], center[0], dx, dy, width=1.0, color='b')
+            arrow = Arrow(center[0], center[1], dx, dy, width=1.0, color='b')
     
         cl.ax0.add_artist(arrow)
         
@@ -220,12 +221,12 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
             # plot wing orientation vectors
             wingR = npmovie.kalmanobj.wingcenterR[i]
             if not np.isnan(wingR[0]):
-                arrow = Arrow(center[1], center[0], wingR[1]-30, wingR[0]-30, width=1.0, color='b')
+                arrow = Arrow(center[0], center[1], wingR[1]-30, wingR[0]-30, width=1.0, color='b')
                 cl.ax0.add_artist(arrow)
             
             wingL = npmovie.kalmanobj.wingcenterL[i]
             if not np.isnan(wingL[0]): 
-                arrow = Arrow(center[1], center[0], wingL[1]-30, wingL[0]-30, width=1.0, color='b')
+                arrow = Arrow(center[0], center[1], wingL[1]-30, wingL[0]-30, width=1.0, color='b')
                 cl.ax0.add_artist(arrow)
         
         
@@ -282,7 +283,7 @@ def strobe_from_npmovie(npmovie, interval=200, frames=None):
             
             uimg = npmovie.uframes[i].uimg
             indices = npmovie.uframes[i].indices
-            center = npmovie.uframes[i].center
+            #center = npmovie.uframes[i].center
             blank = 255*np.ones_like(bkgrd)
             #blank.dtype = float
             
@@ -537,7 +538,7 @@ def calc_timestamps(npmovie):
     npmovie.timestamps *= 1./float(npmovie.fps)
 
 def timestamp2frame(npmovie, timestamp):
-    return float(npmovie.fps)*timestamp
+    return int(float(npmovie.fps)*timestamp)
         
 #def align_sa1_flydra_fmin_func(dataset1, dataset2, index):
     
@@ -549,13 +550,16 @@ def interp_flydra_data_to_sa1(npmovie, data):
     
     return flydra_data
     
-def interp_sa1_data_to_flydra(npmovie, data, frames):
+def interp_sa1_data_to_flydra(npmovie, data, time, return_time=False):
     sa1_raw_data = data
-    sa1_raw_time = npmovie.timestamps[frames]
+    sa1_raw_time = time
     sa1_interpolated_time = np.arange(sa1_raw_time[0], sa1_raw_time[-1], 1./float(100.) )
     sa1_data = np.interp( sa1_interpolated_time, sa1_raw_time, sa1_raw_data )
     
-    return sa1_data
+    if return_time is False:
+        return sa1_data
+    else:
+        return sa1_data, sa1_interpolated_time
     
 def convolve(a1, a2):
     
@@ -588,9 +592,138 @@ def align_sa1_flydra(npmovie, plot=False):
         t = np.arange(npmovie.sa1_start_index, npmovie.sa1_start_index+len(sa1_data), 1)
         plt.plot(t, sa1_data/sa1_data.max()) 
             
-        
 
+        
+def save_image_sequence(npmovie, frames, filename):
+    # filename should be path + filename with initial number scheme + .extension desired, ie. jpg or png
+    # the path should exist prior to calling the function
+    imname = filename[filename.rfind('/')+1:]
+    impath = filename[0:filename.rfind('/')+1]
+    imname_no_extension = imname[0:imname.rfind('.')]
+    imext = imname[imname.rfind('.'):]
+    imbasename = imname_no_extension.rstrip('0123456789')
+    imnumlen = len(imname_no_extension) - len(imbasename)
+
+    i = -1
+    for frame in frames:
+        i += 1
+        stri = str(i)
+        while len(stri) < imnumlen:
+            stri = '0' + stri        
+        
+        fname = impath + imbasename + stri + imext
+        strobe = strobe_from_npmovie(npmovie, 1, frames=[frame, frame+1])
+        strobe = nim.rotate_image(strobe, np.array([[0,1],[-1,0]]))
+        plt.imsave(fname, strobe, origin='lower')
+        
+def get_frames_from_timestamps(npmovie, timestamps):
+    frames = [timestamp2frame(npmovie, timestamp) for timestamp in timestamps]
+    return frames    
+    
+def parse_path(filename):
+    ''' splits a filename into the following:
+    filename: '/home/floris/basename_001.jpg'
+    path: '/home/floris/'
+    basename: 'basename_'
+    initnum: '001'
+    ext: '.jpg'
+    '''
+
+    imname = filename[filename.rfind('/')+1:]
+    impath = filename[0:filename.rfind('/')+1]
+    imname_no_extension = imname[0:imname.rfind('.')]
+    imext = imname[imname.rfind('.'):]
+    imbasename = imname_no_extension.rstrip('0123456789')
+    imnumlen = len(imname_no_extension) - len(imbasename)
+    iminitnum = imname_no_extension[len(imbasename):]
     
     
+    parsed = {}
+    parsed.setdefault('path', impath)
+    parsed.setdefault('basename', imbasename)
+    parsed.setdefault('numlen', imnumlen)
+    parsed.setdefault('initnum', iminitnum)
+    parsed.setdefault('ext', imext)
     
+    return parsed
+    
+def composite_movie():
+
+    comp_im0 = '/home/floris/Desktop/composite/im_000.png'
+
+    sa1_im0 = '/home/floris/Desktop/imseq/im_000.png'
+    fsee_im0 = '/home/floris/src/fsee_utils/src/floris/fsee_sequence/ommatidia2image_reflines_00.png'
+    
+    sa1_fileparsing = parse_path(sa1_im0)
+    fsee_fileparsing = parse_path(fsee_im0)
+    comp_fileparsing = parse_path(comp_im0)
+    
+    pathparsings = [sa1_fileparsing, fsee_fileparsing]
+    
+    origins = [[0,0], [0,1024]]
+    comp_imsize = [1024,1664]
+    
+    i = -1
+    while 1:
+        i += 1
+        
+        #if 1:
+        try:
+            images = []
+            for pathparsing in pathparsings:
+            
+                initnum = pathparsing['initnum']
+                n = i+int(initnum)
+                strn = str(n)
+                while len(strn) < pathparsing['numlen']:
+                    strn = '0' + strn
+                    
+                filename = pathparsing['path'] + pathparsing['basename'] + strn + pathparsing['ext']
+                im = plt.imread(filename)
+                images.append(im)
+        
+            comp_rgb = nim.place_images(comp_imsize, images, origins)
+            comp_filename = comp_fileparsing['path'] + comp_fileparsing['basename'] + strn + comp_fileparsing['ext']
+            scipy.misc.imsave(comp_filename, comp_rgb)
+        except:
+            print 'cannot read files, iterations: ', i
+            break
+        
+def flydra_to_sa1_transform(pt):
+    m = np.array([[0,1],[-1,0]])
+    if len(pt.shape) == 2:
+        arr = np.zeros_like(pt)
+        for i, p in enumerate(pt):
+            arr[i] = np.dot(m,p)
+        return arr
+    else:
+        return np.dot(m,pt)
+    
+def sa1_to_flydra_img_transform(pt, fix_sign=True):
+    m = np.array([[0,-1],[1,0]])
+    arr = sf_transform(pt, m, fix_sign=fix_sign)
+    return arr
+    
+def sa1_to_flydra_data_transform(pt, fix_sign=False):
+    m = np.array([[-1,0],[0,1]])
+    arr = sf_transform(pt, m, fix_sign=fix_sign)
+    return arr
+    
+def sf_transform(pt, m, fix_sign=False):
+    if len(pt.shape) == 2:
+        arr = np.zeros_like(pt)
+        for i, p in enumerate(pt):
+            arr[i] = np.dot(m,p)
+            if fix_sign:    
+                for j in range(2):
+                    if arr[i,j] < 0:
+                        arr[i,j] += 1024
+        return arr
+    else:
+        arr = np.dot(m,pt)
+        if fix_sign:    
+                for j in range(2):
+                    if arr[j] < 0:
+                        arr[j] += 1024
+        return arr
     

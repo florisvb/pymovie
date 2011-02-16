@@ -439,7 +439,40 @@ def congrid(a, newdims, method='linear', centre=False, minusone=False):
               "and \'spline\' are supported."
         return None
 
-
+def place_images(image_size, images, image_placements):
+    # this function is used to put separate images together on one image plane in arbitrary placements - for making composite movies
+    # currently assumes grayscale!
+    master_image = np.zeros(image_size)
+    for i, image in enumerate(images):
+        if len(image.shape) > 2:
+            image = image[:,:,0]
+        if image.max() > 0:
+            image = np.array(image, dtype=float)
+            image /= image.max()
+        origin = image_placements[i]
+        master_image[origin[0]:origin[0]+image.shape[0], origin[1]:origin[1]+image.shape[1]] = image
+    master_image_rgb = np.zeros([master_image.shape[0], master_image.shape[1], 3])
+    for i in range(3):
+        master_image_rgb[:,:,i] = master_image
+    return master_image_rgb    
+    
+def rotate_image(img, rot):
+    
+    imgrot = np.zeros_like(img)
+    
+    for r in range(img.shape[0]):
+        for w in range(img.shape[1]):
+            ptrot = np.dot(rot, np.array([r,w]))
+            rrot = ptrot[0]
+            wrot = ptrot[1]
+            if rrot < 0:
+                rrot += img.shape[0]
+            if wrot < 0:
+                wrot += img.shape[1]
+            imgrot[rrot, wrot] = img[r,w]
+    return imgrot
+                
+    
 ##############################################################################
 def rebin( a, newshape ):
         '''Rebin an array to a new shape.
