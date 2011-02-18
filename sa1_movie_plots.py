@@ -1,6 +1,6 @@
 import sys
-
 sys.path.append('/home/floris/src/analysis')
+sys.path.append('/home/floris/src/floris')
 
 from matplotlib.pyplot import figure, show
 from matplotlib.patches import Ellipse, Rectangle
@@ -25,6 +25,10 @@ import classification as clas
 import sa1_analysis as sa1
 
 import scipy.misc
+
+import camera_math
+
+import flydra.reconstruct
 
 import copy
 
@@ -727,3 +731,65 @@ def sf_transform(pt, m, fix_sign=False):
                         arr[j] += 1024
         return arr
     
+    
+def sync_2d_3d_data(npmovie):
+    
+    try:
+        tmp = npmovie.sa1_start_index
+        del(tmp)
+    except:
+        align_sa1_flydra(npmovie, plot=False)
+    
+    npmovie.sync2d3d = pm.Object(npmovie)
+    
+    frames = get_active_frames(npmovie)
+    interp_data, time = interp_sa1_data_to_flydra(npmovie, npmovie.flycoord.dist_to_post[frames].T[0], npmovie.timestamps[frames], return_time=True)
+    sync_frames_sa1 = get_frames_from_timestamps(npmovie, time)
+    final_flydra_frame = np.min(npmovie.sa1_start_index+len(sync_frames_sa1), len(npmovie.trajec.positions))
+    sync_frames_flydra = np.arange(npmovie.sa1_start_index, final_flydra_frame)
+    sync_frames_sa1 = sync_frames_sa1[0:len(sync_frames_flydra)]
+    
+    npmovie.sync2d3d.frames2d = sync_frames_sa1
+    npmovie.sync2d3d.frames3d = sync_frames_flydra
+    
+    npmovie.sync2d3d.pos2d = npmovie.kalmanobj.positions[npmovie.sync2d3d.frames2d,:]
+    npmovie.sync2d3d.pos3d = npmovie.trajec.positions[npmovie.sync2d3d.frames3d,:]
+    
+def calc_sa1_reconstructor(npmovie):
+    pmat, residuals = camera_math.DLT(npmovie.sync2d3d.pos3d, npmovie.sync2d3d.pos2d, normalize = True)
+    cal = flydra.reconstruct.SingleCameraCalibration(cam_id='sa1', Pmat=pmat, res=(1024,1024), scale_factor=1)
+    npmovie.reconstructor = flydra.reconstruct.Reconstructor([cal])
+    
+def set_sa1_reconstructor(npmovie, reconstructor):
+    npmovie.reconstructor = reconstructor
+
+    npmovie.sync2d3d = pm.Object(npmovie)
+    frames = get_active_frames(npmovie)
+    interp_data, time = interp_sa1_data_to_flydra(npmovie, npmovie.flycoord.dist_to_post[frames].T[0], npmovie.timestamps[frames], return_time=True)
+    sync_frames_sa1 = get_frames_from_timestamps(npmovie, time)
+    
+    npmovie.sync2d3d.frames2d = sync_frames_sa1
+    npmovie.sync2d3d.pos2d = npmovie.kalmanobj.positions[npmovie.sync2d3d.frames2d,:]
+
+    try:    
+        npmovie.sync2d3d.frames3d = sync_frames_flydra
+        npmovie.sync2d3d.pos3d = npmovie.trajec.positions[npmovie.sync2d3d.frames3d,:]
+    except:
+        pass
+    
+    
+def reproject_reconstruction(npmovie):
+    plt.plot(npmovie.sync2d3d.pos2d[:,0], npmovie.sync2d3d.pos2d[:,1])
+    reconstructed = np.zeros_like(npmovie.sync2d3d.pos2d)
+    for r in range(reconstructed.shape[0]):
+        reconstructed[r,:] = npmovie.reconstructor.find2d('sa1', npmovie.sync2d3d.pos3d[r])
+    plt.plot(reconstructed[:,0], reconstructed[:,1], '*')
+    return reconstructed
+    
+def calc_3d_estimate_from_2d(npmovie, w=0.01):
+    npmovie.sync2d3d.pos3d_est = np.zeros([npmovie.sync2d3d.pos2d.shape[0], 3])
+    for r in range(npmovie.sync2d3d.pos3d_est.shape[0]):
+        npmovie.sync2d3d.pos3d_est[r] = npmovie.reconstructor.get_SingleCameraCalibration('sa1').get_example_3d_point_creating_image_point(npmovie.sync2d3d.pos2d[r], w)
+    
+    
+
