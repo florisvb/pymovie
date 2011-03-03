@@ -1,6 +1,7 @@
 import sys
 sys.path.append('/home/floris/src/analysis')
 sys.path.append('/home/floris/src/floris')
+sys.path.append('/home/floris/src/fsee_utils/src/floris')
 
 from matplotlib.pyplot import figure, show
 from matplotlib.patches import Ellipse, Rectangle
@@ -18,15 +19,19 @@ from matplotlib.patches import Patch
 from matplotlib.patches import Arrow
 from matplotlib.patches import Arc
 
+import adskalman.adskalman as adskalman
 import numpyimgproc as nim
 import pickle
 import pygmovie as pm
 import classification as clas
 import sa1_analysis as sa1
 
+import kmeans_npmovie as kn
+
 import scipy.misc
 
 import camera_math
+import fsee_timeseries
 
 import flydra.reconstruct
 
@@ -61,7 +66,7 @@ def load(filename):
     return npmovie
     
     
-def xy_kalman(npmovie, frames=None, figure=None):
+def xy_kalman(npmovie, frames=None, figure=None, colormap='jet'):
     
     if frames is None:
         frames = get_all_frames(npmovie)
@@ -71,7 +76,7 @@ def xy_kalman(npmovie, frames=None, figure=None):
     y = posrot[:,1]
     s = npmovie.kalmanobj.speed[frames,0]
         
-    cl = xy_trajectory(x,y,s,figure=figure)
+    cl = xy_trajectory(x,y,s,figure=figure, colormap=colormap)
     return cl
     
 
@@ -111,12 +116,11 @@ def xy_trajectory(x, y, z, colorcode='s', norm=None, xlim=(0, 1024), ylim=(0,102
     
     
     
-def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
+def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50, show_vision=True):
     calc_frame_of_landing(npmovie)
     frames = get_active_frames(npmovie)
-    print frames
     time = np.array(frames)*1/float(npmovie.fps)
-    cl = xy_kalman(npmovie, figure=figure, frames=frames)
+    cl = xy_kalman(npmovie, figure=figure, frames=frames, colormap='gray')
     
     # get strobe image:
     strobe_img = strobe_from_npmovie(npmovie, interval=210, frames=frames)
@@ -129,13 +133,13 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
     nyticks = 3
     
     # subplot parameters
-    n = 7
+    n = 8
     h = (0.7-.05*(n-2))/float(n)
     
     subplots = []
     
     for s in range(n):
-        ax = cl.fig.add_axes([0.71,0.1+(h+.05)*s,0.2,h])
+        ax = cl.fig.add_axes([0.47,0.1+(h+.05)*s,0.2,h])
         subplots.append(ax)
     
     xticks = np.linspace(0, 1, num=nxticks, endpoint=True).tolist()
@@ -183,6 +187,14 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
     subplots[p].set_ylabel('sideways vel')
     
     p += 1
+    subplots[p].plot(time, npmovie.flycoord.speed[frames])
+    subplots[p].set_xticks(xticks)
+    default_yticks = subplots[p].get_yticks()
+    yticks = np.linspace(default_yticks[0], default_yticks[-1], nyticks, endpoint=True).tolist()
+    subplots[p].set_yticks(yticks)
+    subplots[p].set_ylabel('speed')
+    
+    p += 1
     subplots[p].plot(time, npmovie.kalmanobj.legs[frames])
     subplots[p].set_xticks(xticks)
     default_yticks = subplots[p].get_yticks()
@@ -214,10 +226,20 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
         dy = long_axis[0]*factor
         
         legs = npmovie.kalmanobj.legs[i]
-        if legs > legthresh:
-            arrow = Arrow(center[0], center[1], dx, dy, width=1.0, color='r')
-        else:
-            arrow = Arrow(center[0], center[1], dx, dy, width=1.0, color='b')
+        
+        #### get color from kmeans clusters ###
+        speed = np.interp(npmovie.timestamps[i], npmovie.trajec.epoch_time, npmovie.trajec.speed)
+        slipangle = npmovie.flycoord.slipangle[i]
+        print npmovie.id, i
+        dyaw = np.interp(npmovie.timestamps[i], npmovie.trajec.epoch_time[npmovie.sync2d3d.frames3d], npmovie.sync2d3d.smoothyaw[:,1])
+        obs = np.nan_to_num(np.array([np.abs(dyaw), speed, np.abs(slipangle)]))
+        cluster = kn.get_cluster_for_data(npmovie, obs)
+        
+        colormap = plt.get_cmap('jet')
+        color = colormap((cluster) / float(npmovie.cluster_means.shape[0]))
+        print 'color: ', color
+        
+        arrow = Arrow(center[0], center[1], dx, dy, width=1.0, color=color)
     
         cl.ax0.add_artist(arrow)
         
@@ -237,6 +259,27 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50):
         i += interval
             
     #plt.show()
+    try:
+        if npmovie.vision_timeseries is not None:
+            cl.vision_axes = [None for m in range(3)]
+            for m in range(3):
+                print 
+                print m, len(npmovie.vision_timeseries)
+                cl.vision_axes[m] = cl.fig.add_axes([0.75,0.1+0.25*m,0.2,.2])
+                cl.vision_axes[m].imshow(npmovie.vision_timeseries[m], pyplot.get_cmap('gray'), origin='lower')
+                cl.vision_axes[m].set_xticks([])
+                time_raw = npmovie.timestamps[npmovie.sync2d3d.frames2d] - npmovie.timestamps[0]
+                time = np.array([float(int(1000.*time_raw[i]))/1000. for i in range(len(time_raw))])
+
+                cl.vision_axes[m].set_yticks(np.linspace(0,npmovie.vision_timeseries[m].shape[0], 5).tolist())
+                cl.vision_axes[m].set_yticklabels(np.linspace(time[0], time[-1], 5).tolist())
+                
+                xlabel = 'horizontal slice of fly eye at ' + str( (m-1)*45 ) + ' deg'
+                
+                cl.vision_axes[m].set_xlabel(xlabel)
+                cl.vision_axes[m].set_ylabel('time, sec')
+    except:
+        print 'no vision timeseries'    
     return cl
     
     
@@ -441,31 +484,40 @@ def plot_wingbeats(npmovie):
 
 
 
-def pdf_movie_data(movie_dataset, scale = 10):
+def pdf_movie_data(movie_dataset, scale = 10, movies = None):
     
     # Initialize:
     pp =  pdf.PdfPages('sa1_movies_2_test.pdf')
     f = 0
     
-    for key,mnpmovie in movie_dataset.items():
-        f += 1
-        cl = plot_movie_data(mnpmovie, show_wings=False, figure=f)
+    if movies is None:
+        movies = movie_dataset.keys()
+    elif type(movies) is not list:
+        movies = [movies]
+       
         
-        try:
-            extras = mnpmovie.extras[0]
-        except:
-            extras = '' 
-        print mnpmovie.id, mnpmovie.behavior, extras
-        if extras == 'none':
-            extras = ''
-        title = mnpmovie.id + ' ' + mnpmovie.behavior + ' ' + extras
-        
-        plt.Figure.set_figsize_inches(cl.fig, [2*scale,1*scale])
-        plt.Figure.set_dpi(cl.fig, 72)
-        
-        cl.ax0.set_title(title)
-        pp.savefig(f)
-        plt.close(f)
+    
+    for key in movies:
+        mnpmovie = movie_dataset[key]
+        if mnpmovie.trajec is not None:
+            f += 1
+            cl = plot_movie_data(mnpmovie, show_wings=False, figure=f)
+            
+            try:
+                extras = mnpmovie.extras[0]
+            except:
+                extras = '' 
+            print mnpmovie.id, mnpmovie.behavior, extras
+            if extras == 'none':
+                extras = ''
+            title = mnpmovie.id + ' ' + mnpmovie.behavior + ' ' + extras
+            
+            plt.Figure.set_figsize_inches(cl.fig, [2*scale,1*scale])
+            plt.Figure.set_dpi(cl.fig, 72)
+            
+            cl.ax0.set_title(title)
+            pp.savefig(f)
+            plt.close(f)
 
     # Once you are done, remember to close the object:
     pp.close()
@@ -552,7 +604,10 @@ def interp_flydra_data_to_sa1(npmovie, data):
     flydra_interpolated_time = np.arange(flydra_raw_time[0], flydra_raw_time[-1], 1./float(npmovie.fps) )
     flydra_data = np.interp( flydra_interpolated_time, flydra_raw_time, flydra_raw_data )
     
-    return flydra_data
+    if return_time is False:
+        return flydra_data
+    else:
+        return flydra_data, flydra_interpolated_time
     
 def interp_sa1_data_to_flydra(npmovie, data, time, return_time=False):
     sa1_raw_data = data
@@ -576,27 +631,45 @@ def convolve(a1, a2):
     
     conv = np.zeros( [len(along)-len(ashort)] )
     for i in range(len(conv)):    
-        conv[i] = 1/np.sum(np.abs(along[i:i+len(ashort)] - ashort))
+        conv[i] = np.sum(np.abs(along[i:i+len(ashort)] - ashort))
     
     return conv
     
     
 def align_sa1_flydra(npmovie, plot=False):
-    frames = get_active_frames(npmovie)
-     
-         
-    sa1_data = np.diff(interp_sa1_data_to_flydra(npmovie, npmovie.flycoord.dist_to_post[frames].T[0], frames))
-    flydra_data = np.diff(npmovie.trajec.dist_to_stim_r + npmovie.trajec.stimulus.radius)
-    conv = convolve(sa1_data/sa1_data.max(), flydra_data/flydra_data.max())
-    npmovie.sa1_start_index = np.argmax(conv)
-            
+
+    try:
+        frames = get_active_frames(npmovie)
+        first_frame_stamp = npmovie.timestamps[frames[0]]
+        dt = npmovie.trajec.epoch_time - first_frame_stamp
+        sa1_start_frame = np.argmin(np.abs(dt))
+        npmovie.sa1_start_frame = sa1_start_frame
+        return True
+
+    except:
+        print 'no timestamp data'
+        return False
+    
+#    sa1_data = np.diff(interp_sa1_data_to_flydra(npmovie, npmovie.flycoord.dist_to_post[frames].T[0], npmovie.timestamps[frames]))
+#    flydra_data = np.diff(npmovie.trajec.dist_to_stim_r + npmovie.trajec.stimulus.radius)
+#    conv = convolve(sa1_data/sa1_data.max(), flydra_data/flydra_data.max())
+    
     if plot:
+        print flydra_data.shape, sa1_data.shape, conv.shape
         plt.plot(conv/np.max(conv))
         plt.plot(flydra_data/flydra_data.max())
-        t = np.arange(npmovie.sa1_start_index, npmovie.sa1_start_index+len(sa1_data), 1)
+        t = np.arange(np.argmax(conv), np.argmax(conv)+len(sa1_data), 1)
         plt.plot(t, sa1_data/sa1_data.max()) 
-            
-
+        plt.legend(['conv', 'flydra', 'sa1'])
+    
+#    index = np.argmax(conv)
+#    if index < len(conv) and index > 0:
+#        npmovie.sa1_start_index = np.argmax(conv)
+#        return True
+#    else:
+#        npmovie.sa1_start_index = None
+#        return False
+        
         
 def save_image_sequence(npmovie, frames, filename):
     # filename should be path + filename with initial number scheme + .extension desired, ie. jpg or png
@@ -731,34 +804,45 @@ def sf_transform(pt, m, fix_sign=False):
                         arr[j] += 1024
         return arr
     
+def normalize(arr):
+    return (arr-arr.min()) / (arr-arr.min()).max()
     
-def sync_2d_3d_data(npmovie):
+def sync_2d_3d_data(npmovie, plot=False, res='lo'):
     
-    try:
-        tmp = npmovie.sa1_start_index
-        del(tmp)
-    except:
-        align_sa1_flydra(npmovie, plot=False)
-    
-    npmovie.sync2d3d = pm.Object(npmovie)
-    
-    frames = get_active_frames(npmovie)
-    interp_data, time = interp_sa1_data_to_flydra(npmovie, npmovie.flycoord.dist_to_post[frames].T[0], npmovie.timestamps[frames], return_time=True)
-    sync_frames_sa1 = get_frames_from_timestamps(npmovie, time)
-    final_flydra_frame = np.min(npmovie.sa1_start_index+len(sync_frames_sa1), len(npmovie.trajec.positions))
-    sync_frames_flydra = np.arange(npmovie.sa1_start_index, final_flydra_frame)
-    sync_frames_sa1 = sync_frames_sa1[0:len(sync_frames_flydra)]
-    
-    npmovie.sync2d3d.frames2d = sync_frames_sa1
-    npmovie.sync2d3d.frames3d = sync_frames_flydra
-    
-    npmovie.sync2d3d.pos2d = npmovie.kalmanobj.positions[npmovie.sync2d3d.frames2d,:]
-    npmovie.sync2d3d.pos3d = npmovie.trajec.positions[npmovie.sync2d3d.frames3d,:]
-    
+    if res == 'lo':
+        is_sync_successful = align_sa1_flydra(npmovie, plot=False)
+        if not is_sync_successful:
+            return is_sync_successful
+        else:
+            npmovie.sync2d3d = pm.Object(npmovie)
+            
+            frames = get_active_frames(npmovie)
+            interp_data, time = interp_sa1_data_to_flydra(npmovie, npmovie.flycoord.dist_to_post[frames].T[0], npmovie.timestamps[frames]-npmovie.timestamps[0], return_time=True)
+            sync_frames_sa1 = get_frames_from_timestamps(npmovie, time)
+            final_flydra_frame = np.min([npmovie.sa1_start_frame+len(sync_frames_sa1), len(npmovie.trajec.positions)])
+            sync_frames_flydra = np.arange(npmovie.sa1_start_frame, final_flydra_frame)
+            sync_frames_sa1 = sync_frames_sa1[0:len(sync_frames_flydra)]
+            
+            npmovie.sync2d3d.frames2d = sync_frames_sa1
+            npmovie.sync2d3d.frames3d = sync_frames_flydra.tolist()
+            
+            npmovie.sync2d3d.pos2d = npmovie.kalmanobj.positions[npmovie.sync2d3d.frames2d,:]
+            npmovie.sync2d3d.pos3d = npmovie.trajec.positions[npmovie.sync2d3d.frames3d,:]
+            
+            if plot is True:
+                sa1_data = npmovie.flycoord.dist_to_post[npmovie.sync2d3d.frames2d].T[0]
+                flydra_data = npmovie.trajec.dist_to_stim_r + npmovie.trajec.stimulus.radius
+                plt.plot(npmovie.trajec.epoch_time, normalize(flydra_data))
+                print npmovie.timestamps[npmovie.sync2d3d.frames2d].shape, sa1_data.shape, np.max(sa1_data)
+                plt.plot(npmovie.timestamps[npmovie.sync2d3d.frames2d], normalize(sa1_data)) 
+                plt.legend(['flydra', 'sa1'])
+            return is_sync_successful
+
 def calc_sa1_reconstructor(npmovie):
     pmat, residuals = camera_math.DLT(npmovie.sync2d3d.pos3d, npmovie.sync2d3d.pos2d, normalize = True)
     cal = flydra.reconstruct.SingleCameraCalibration(cam_id='sa1', Pmat=pmat, res=(1024,1024), scale_factor=1)
     npmovie.reconstructor = flydra.reconstruct.Reconstructor([cal])
+    return npmovie.reconstructor
     
 def set_sa1_reconstructor(npmovie, reconstructor):
     npmovie.reconstructor = reconstructor
@@ -778,18 +862,131 @@ def set_sa1_reconstructor(npmovie, reconstructor):
         pass
     
     
-def reproject_reconstruction(npmovie):
+def reproject_reconstruction(npmovie, estimated=False):
     plt.plot(npmovie.sync2d3d.pos2d[:,0], npmovie.sync2d3d.pos2d[:,1])
     reconstructed = np.zeros_like(npmovie.sync2d3d.pos2d)
+    if estimated is False:
+        data = npmovie.sync2d3d.pos3d
+    else:
+        data = npmovie.sync2d3d.pos3d_est
     for r in range(reconstructed.shape[0]):
-        reconstructed[r,:] = npmovie.reconstructor.find2d('sa1', npmovie.sync2d3d.pos3d[r])
+        reconstructed[r,:] = npmovie.reconstructor.find2d('sa1', data[r])
     plt.plot(reconstructed[:,0], reconstructed[:,1], '*')
     return reconstructed
     
-def calc_3d_estimate_from_2d(npmovie, w=0.01):
+def calc_3d_estimate_from_2d(npmovie, z = 0):
     npmovie.sync2d3d.pos3d_est = np.zeros([npmovie.sync2d3d.pos2d.shape[0], 3])
     for r in range(npmovie.sync2d3d.pos3d_est.shape[0]):
-        npmovie.sync2d3d.pos3d_est[r] = npmovie.reconstructor.get_SingleCameraCalibration('sa1').get_example_3d_point_creating_image_point(npmovie.sync2d3d.pos2d[r], w)
+        if type(z) is list:
+            zval = z[r]
+        else:
+            zval = z
+        npmovie.sync2d3d.pos3d_est[r] = npmovie.reconstructor.get_SingleCameraCalibration('sa1').get_3d_point_given_zval(npmovie.sync2d3d.pos2d[r], zval)
+    
+def calc_body_orientations(npmovie):
+    def rotz(theta):
+        ''' Returns a 3x3 rotation matrix corresponding to rotation around the *z* axis. '''
+        return np.array([   [ np.cos(theta), -np.sin(theta), 0],
+                            [ np.sin(theta), np.cos(theta), 0],
+                            [0, 0, 1]])
+                            
+    npmovie.sync2d3d.long_axis = npmovie.kalmanobj.long_axis[npmovie.sync2d3d.frames2d,:]
+    npmovie.sync2d3d.attitudes = [None for i in range(len(npmovie.sync2d3d.long_axis))]
+    
+    npmovie.sync2d3d.flydra_coordinates_longaxis = sa1_to_flydra_data_transform(npmovie.sync2d3d.long_axis)
+    npmovie.sync2d3d.yaw = np.arctan2(npmovie.sync2d3d.flydra_coordinates_longaxis[:,1], npmovie.sync2d3d.flydra_coordinates_longaxis[:,0])
+    for r in range(npmovie.sync2d3d.yaw.shape[0]):
+        npmovie.sync2d3d.attitudes[r] = rotz(npmovie.sync2d3d.yaw[r])
+    
+    if 0: # this is an attempt at getting the right yaw out of the reprojection system... doesn't work
+        npmovie.sync2d3d.long_axis = npmovie.kalmanobj.long_axis[npmovie.sync2d3d.frames2d,:]
+        npmovie.sync2d3d.yaw = np.zeros([npmovie.sync2d3d.pos2d.shape[0]])
+        npmovie.sync2d3d.attitudes = [None for i in range(len(npmovie.sync2d3d.yaw))]
+        for r in range(npmovie.sync2d3d.yaw.shape[0]):
+            center3d = npmovie.sync2d3d.pos3d_est[r]
+            head2d = npmovie.sync2d3d.pos2d[r] + npmovie.sync2d3d.long_axis[r]*10
+            head3d = npmovie.reconstructor.get_SingleCameraCalibration('sa1').get_example_3d_point_creating_image_point(head2d, 0.01)
+            vector = head3d - center3d
+            theta = np.arctan2(vector[1], vector[0])
+            npmovie.sync2d3d.yaw[r] = theta
+            npmovie.sync2d3d.attitudes[r] = rotz(theta)
+        
+def calc_function_for_dataset(movie_dataset, functions, args):
+    # iterate through all npmovies for a list of functions
+    for key,npmovie in movie_dataset.items():
+        print 'processing: ', key
+        for f, function in enumerate(functions):
+            try:
+                function(npmovie, args[f])
+            except:
+                function(npmovie)    
     
     
+def prep_visual_timeseries_data(movie_dataset):
+    for key,npmovie in movie_dataset.items():
+        if npmovie.trajec is not None:
+            print 'processing: ', key
+            is_sync_successful = sync_2d_3d_data(npmovie)
+            if is_sync_successful:
+                calc_body_orientations(npmovie)
+                try:
+                    vision_timeseries = fsee_timeseries.calc_vision_timeseries(npmovie)
+                except:
+                    npmovie.vision_timeseries = None
+            else:
+                npmovie.vision_timeseries = None
+        else:
+            #print key
+            npmovie.vision_timeseries = None
+            
+            
+def get_sa1_timestamps_from_movie_dict(movie_dataset, movies):
+    # movies should come from sa1_analysis.sa1_analysis()
+    
+    for k,npmovie in movie_dataset.items():
+        npmovie.trigger_stamp = movies[k]['Trigger Stamp']
+        npmovie.timestamps = movies[k]['Timestamps']
+            
+            
+def smooth(data, Q, R, F=None, H=None, interpvals=0):
+    os = data.shape[1] # observation size
+    ss = os*2 # state size
+    
+    if F is None:
+        if ss == 4:
+            F = np.array([  [1,0,1,0], # process update
+                            [0,1,0,1],
+                            [0,0,1,0],
+                            [0,0,0,1]],
+                            dtype=np.float)
+        elif ss == 2:
+            F = np.array([   [1,1], # process update
+                             [0,1]],
+                             dtype=np.float)
+                    
+    if H is None:
+        if ss == 4:
+            H = np.array([   [1,0,0,0], # observation matrix
+                             [0,1,0,0]],
+                             dtype=np.float) 
+                    
+        elif ss == 2:         
+            H = np.array([   [1,0] ], # observation matrix
+                             dtype=np.float)
+    
+    data = np.nan_to_num(data)
+    interpolated_data = np.zeros_like(data)
+    
+    for c in range(data.shape[1]):
+        interpolated_data[:,c] = pm.interpolate(data[:,c], interpvals)
+    y = interpolated_data
+    initx = np.array([y[0,0],y[1,0]-y[0,0]],dtype=np.float)
+    initV = 0*np.eye(ss)
+
+    xsmooth,Vsmooth = adskalman.kalman_smoother(y,F,H,Q,R,initx,initV)
+
+    return xsmooth, Vsmooth
+            
+            
+
 

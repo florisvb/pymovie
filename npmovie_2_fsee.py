@@ -9,7 +9,7 @@ def save(data, filename):
     fd.close()
     return 1
 
-def write_to_fsee(npmovie, name='fsee_data'):
+def write_to_fsee_old(npmovie, name='fsee_data'):
     
     def rotz(theta):
         ''' Returns a 3x3 rotation matrix corresponding to rotation around the *z* axis. '''
@@ -43,3 +43,28 @@ def write_to_fsee(npmovie, name='fsee_data'):
     save(states, name)
     
     return 1    
+    
+def write_to_fsee(npmovie, name='fsee_data'):
+    
+    def rotz(theta):
+        ''' Returns a 3x3 rotation matrix corresponding to rotation around the *z* axis. '''
+        return np.array([   [ np.cos(theta), -np.sin(theta), 0],
+                            [ np.sin(theta), np.cos(theta), 0],
+                            [0, 0, 1]])
+        
+    frames = smp.get_active_frames(npmovie)
+    positions = []
+    attitudes = []
+    states = {}
+    
+    for i in range(len(npmovie.sync2d3d.pos2d)):
+        positions.append( npmovie.sync2d3d.pos3d_est[i,:] )
+        print npmovie.sync2d3d.yaw[i]
+        attitudes.append( rotz(npmovie.sync2d3d.yaw[i]) )
+    
+    states.setdefault('positions', positions)
+    states.setdefault('attitudes', attitudes)
+    
+    save(states, name)
+    
+    return 1 
