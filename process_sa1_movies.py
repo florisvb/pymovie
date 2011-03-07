@@ -10,7 +10,7 @@ import sa1_analysis as sa1a
 import analysis_plot as ap
 
         
-def process_movie(MOVIE_ID, movie_info=None): 
+def process_movie(MOVIE_ID, movie_info=None, dataset=None): 
         
         if movie_info is None:
             filename = '/home/floris/data/windtunnel/SA1/movie_info'
@@ -67,9 +67,9 @@ def process_movie(MOVIE_ID, movie_info=None):
             
         pm.smooth_legs(npmovie)
         pm.calc_polarpos(npmovie)
-        
         pm.smooth_axis_ratio(npmovie)
-            
+        trajec, time_err = sa1a.get_flydra_trajectory(npmovie, dataset)
+        smp.sync_2d_3d_data(npmovie)
         #strobe_img = pm.strobe_image(movie)
         #movie_info[MOVIE_ID].setdefault('StrobeImg', strobe_img)
 
@@ -80,41 +80,64 @@ def process_movie(MOVIE_ID, movie_info=None):
             
         return npmovie
         
-def batch_process_harddrive(path='/media/SA1_movies_3/sa1_movies/', movie_dataset_filename = None, dataset=None):
-
+def get_relevant_obj_ids_from_dataset(dataset, obj_id_list):
+    reduced_dataset = {}
+    for i in range(obj_id_list.shape[0]):
+        obj_id = obj_id_list[i,0]
+        epochtime = obj_id_list[i,1]
+        
+        if obj_id is not None:
+            obj_id = int(obj_id)
+            
+            for k, trajectory in dataset.trajecs.items():
+                t = k.lstrip('1234567890')
+                t = t.lstrip('_')
+                o = int(t)
+                if obj_id == o:
+                    # check timestamp:
+                    time_err = np.abs(trajectory.epoch_time[0] - epochtime)
+                    print time_err
+                    if time_err < 100:
+                        reduced_dataset.setdefault(copy.copy(k), copy.copy(trajectory))
+                else:
+                    continue
+            
+    return reduced_dataset                
+                
+                
+        
+def batch_process_harddrive(path='/media/SA1_videos/sa1_movies/', movie_dataset_filename = None, dataset=None):
     
-
-    filename = '/home/floris/data/windtunnel/SA1/movie_info'
+    filename = '/home/floris/Documents/data/movie_info'
     fname = (filename)  
     fd = open( fname, mode='r' )
     movie_info = pickle.load(fd)
     fd.close()
+    print len(movie_info.keys())
+    
     
     for MOVIE_ID in movie_info.keys():
-        if movie_info[MOVIE_ID]['Path'] == path:
-            print 'loading id: ', MOVIE_ID
+        #if movie_info[MOVIE_ID]['Path'] == path:
+        print 'loading id: ', MOVIE_ID
 
-            npmovie = process_movie(MOVIE_ID, movie_info)
-            trajec, time_err = sa1a.get_flydra_trajectory(npmovie, dataset)
-            delay = sa1a.find_sa1_timestamp_delay(npmovie, guess=time_err)
-            
-            mnpmovie = pm.MiniNPM(npmovie)
-            del(npmovie)
-            
-            mnpmovie.behavior = movie_info[MOVIE_ID]['Behavior']
-            mnpmovie.path = movie_info[MOVIE_ID]['Path']
-            mnpmovie.posttype = movie_info[MOVIE_ID]['PostType']
-            mnpmovie.extras = movie_info[MOVIE_ID]['Extras']
-            mnpmovie.id = MOVIE_ID
-            
-            if movie_dataset_filename is not None:
-                movie_dataset = pm.load(movie_dataset_filename)
-            else:
-                movie_dataset = {}
-                movie_dataset_filename = 'movie_dataset'
-            movie_dataset.setdefault(MOVIE_ID, mnpmovie)
-            pm.save(movie_dataset, movie_dataset_filename)
-            del(movie_dataset)
+        npmovie = process_movie(MOVIE_ID, movie_info)
+        mnpmovie = pm.MiniNPM(npmovie)
+        del(npmovie)
+        
+        mnpmovie.behavior = movie_info[MOVIE_ID]['Behavior']
+        mnpmovie.path = movie_info[MOVIE_ID]['Path']
+        mnpmovie.posttype = movie_info[MOVIE_ID]['PostType']
+        mnpmovie.extras = movie_info[MOVIE_ID]['Extras']
+        mnpmovie.id = MOVIE_ID
+        
+        if movie_dataset_filename is not None:
+            movie_dataset = pm.load(movie_dataset_filename)
+        else:
+            movie_dataset = {}
+            movie_dataset_filename = 'movie_dataset'
+        movie_dataset.setdefault(MOVIE_ID, mnpmovie)
+        pm.save(movie_dataset, movie_dataset_filename)
+        del(movie_dataset)
               
         
 if __name__ == '__main__':        

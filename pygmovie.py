@@ -386,9 +386,11 @@ class Movie:
             self.load_source(filename)
     
     def load_source(self, filename):
-        print 'loading source'
+        print 'loading source: ', filename
+        self.source = media.load(filename)
         try:
             self.source = media.load(filename)
+            print '1'
             self.width = int(self.source.video_format.width)
             self.height = int(self.source.video_format.height)
             self.duration = self.source.duration
@@ -659,6 +661,8 @@ class MiniNPM:
         self.background = copy.copy(npmovie.background)
         self.obj = copy.copy(npmovie.obj)
         self.kalmanobj = copy.copy(npmovie.kalmanobj)
+        self.sync2d3d = copy.copy(npmovie.sync2d3d)
+        
         try:
             self.flycoord = copy.copy(npmovie.flycoord)
         except:
@@ -676,6 +680,7 @@ class MiniNPM:
         except:
             self.dataset_id = None
         self.epochtime = copy.copy(npmovie.epochtime)
+        
         
         self.uframes = [uFrame() for i in range(len(npmovie.uframes))]
         
