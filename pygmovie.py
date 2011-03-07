@@ -483,13 +483,22 @@ class npMovie:
         if self.dynamic_tracking_mask is False and self.tracking_mask is not None:
             absdiff *= tracking_mask
             
-        absdiff = nim.auto_adjust_levels(absdiff)
+        #absdiff = nim.auto_adjust_levels(absdiff)
         #print 'shape: ', np.shape(absdiff)
         #threshold = max( 10, absdiff.max() - THRESHRANGE )
         #print 'dynamic threshold: ', threshold 
         
         #diffthresh = nim.threshold(absdiff, threshold)
-        diffthresh = nim.threshold(absdiff, 50, threshold_hi=255)
+        print 'max absdiff: ', absdiff.max()
+        diffthresh = nim.threshold(absdiff, 15, threshold_hi=255)
+        
+        # abort early if there is no info:
+        s = np.sum(diffthresh)
+        if s < 10:  
+            uframe = uFrame()
+            print 'no uframe, early abort, sum: ', s 
+            self.dynamic_tracking_mask = False
+            return uframe, None
         blobs = nim.find_blobs(diffthresh, self.blob_size_range)
         
         if blobs is None:
@@ -517,8 +526,10 @@ class npMovie:
         nblobs = blobs.max()
         if nblobs > 1:
             blobs = nim.find_biggest_blob(blobs)
+        print 'n blobs: ', nblobs
             
         center = nim.center_of_blob(blobs)
+        print 'center: ', center
         
         if np.isnan(center)[0] or np.isnan(center)[1]:
             uframe = uFrame()

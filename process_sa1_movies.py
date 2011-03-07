@@ -4,10 +4,20 @@ import numpyimgproc as nim
 import sys
 import numpy as np
 import copy
+import sa1_movie_plots as smp
 
 sys.path.append('/home/floris/src/analysis')
 import sa1_analysis as sa1a
 import analysis_plot as ap
+
+def test():
+    
+    o, m = sa1a.sa1_analysis()
+    print 'processing: ', m.keys()[-1]
+    dataset = pm.load('/home/floris/data/sa1_movie_data/h5_files/reduced_dataset')
+    npmovie = process_movie(m.keys()[-1], m, dataset)
+    
+    return npmovie
 
         
 def process_movie(MOVIE_ID, movie_info=None, dataset=None): 
@@ -38,7 +48,7 @@ def process_movie(MOVIE_ID, movie_info=None, dataset=None):
         npmovie.tracking_mask = tracking_mask
 
         npmovie.calc_background(movie)
-        npmovie.load_frames(movie)
+        npmovie.load_frames(movie, timerange=[.1,.15])
         
         npmovie.fps = 5000.
         
