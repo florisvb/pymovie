@@ -93,16 +93,16 @@ def calc_absdiff(npmovie):
     for i in range(len(npmovie.uframes)):
         uframe = npmovie.uframes[i]
         if uframe.uimg is not None:
-            
-            center = npmovie.obj.positions[i]
-            x_lo = max( 0, int(center[0])-uframe.uimg.shape[0]/2 )
-            x_hi = min( npmovie.background.shape[0], int(center[0])+uframe.uimg.shape[0]/2 )
-            y_lo = max( 0, int(center[1])-uframe.uimg.shape[1]/2 )
-            y_hi = min( npmovie.background.shape[0], int(center[1])+uframe.uimg.shape[1]/2 )
+            print i
+            center = uframe.center
+            x_lo = max( 0, int(center[0])-npmovie.roi_radius )
+            x_hi = min( npmovie.background.shape[0], int(center[0])+npmovie.roi_radius )
+            y_lo = max( 0, int(center[1])-npmovie.roi_radius )
+            y_hi = min( npmovie.background.shape[0], int(center[1])+npmovie.roi_radius )
             bkgrd_uimg = npmovie.background[x_lo:x_hi, y_lo:y_hi]
             
             if uframe.uimg.shape != bkgrd_uimg.shape:
-                uframe.absdiff = np.zeros_like(uframe.uimg)
+               uframe.absdiff = np.zeros_like(uframe.uimg)
             else:
                 uframe.absdiff = nim.absdiff(uframe.uimg, bkgrd_uimg)
             #except:
@@ -183,8 +183,9 @@ def segment_fly(npmovie):
     for i in range(len(npmovie.uframes)):
         uframe = npmovie.uframes[i]
         if uframe.uimg is not None:
-            body = find_object(uframe.uimg_adj, [150,253], [100,400], 10, check_centers=False)
+            body = find_object(uframe.uimg_adj, [150,253], [75,400], 10, check_centers=False)
             uframe.body = copy.copy(body)
+            #print 'BOOL: ', np.sum(uframe.body)/255.
             npmovie.obj.bool[i] = np.sum(uframe.body)/255.
             
             raw_wing_img = copy.copy(uframe.uimg_adj)
@@ -439,7 +440,8 @@ class npMovie:
         
         self.dynamic_tracking_mask = False
         self.mask_center = [0,0]
-        self.mask_radius = 50
+        self.mask_radius = 75
+        self.roi_radius = 30
         
         self.blob_size_range = [50,400]
         
@@ -466,18 +468,19 @@ class npMovie:
         
         if self.dynamic_tracking_mask is True:
             # TODO: currently dynamic tracking and such only works for square format cameras 
-            print 'dynamic tracking'
+            #print 'dynamic tracking'
             masked_img = raw[mask_0_lo:mask_0_hi, mask_1_lo:mask_1_hi]
             masked_background = self.background[mask_0_lo:mask_0_hi, mask_1_lo:mask_1_hi]
         else:
             masked_img = raw
             masked_background = self.background
-
+        '''
         if masked_img.shape[0] < 100 or masked_img.shape[1] < 100:
-            print 'no uframe'
+            #print 'no uframe'
             self.dynamic_tracking_mask = False
             uframe = uFrame()
             return uframe, None        
+        '''
             
         absdiff = nim.absdiff(masked_img, masked_background)
         if self.dynamic_tracking_mask is False and self.tracking_mask is not None:
@@ -489,14 +492,14 @@ class npMovie:
         #print 'dynamic threshold: ', threshold 
         
         #diffthresh = nim.threshold(absdiff, threshold)
-        print 'max absdiff: ', absdiff.max()
+        #print 'max absdiff: ', absdiff.max()
         diffthresh = nim.threshold(absdiff, 15, threshold_hi=255)
         
         # abort early if there is no info:
         s = np.sum(diffthresh)
         if s < 10:  
             uframe = uFrame()
-            print 'no uframe, early abort, sum: ', s 
+            #print 'no uframe, early abort, sum: ', s 
             self.dynamic_tracking_mask = False
             return uframe, None
         blobs = nim.find_blobs(diffthresh, self.blob_size_range)
@@ -516,7 +519,7 @@ class npMovie:
         if blobs is None:
             uframe = uFrame()
             if save_raw is False:
-                print 'no uframe'
+                #print 'no uframe'
                 self.dynamic_tracking_mask = False
                 return uframe, None
             else:
@@ -524,25 +527,26 @@ class npMovie:
                 return uframe, frame
             
         nblobs = blobs.max()
+        #print 'n blobs: ', nblobs
         if nblobs > 1:
             blobs = nim.find_biggest_blob(blobs)
-        print 'n blobs: ', nblobs
+        
             
         center = nim.center_of_blob(blobs)
-        print 'center: ', center
+        #print 'center: ', center
         
         if np.isnan(center)[0] or np.isnan(center)[1]:
             uframe = uFrame()
-            print 'no uframe, NaN center!'
+            #print 'no uframe, NaN center!'
             self.dynamic_tracking_mask = False
             return uframe, None
         if center[0] < 1 or center[1] < 1:
             uframe = uFrame()
-            print 'no uframe, NaN center!'
+            #print 'no uframe, NaN center!'
             self.dynamic_tracking_mask = False
             return uframe, None
         
-        print 'center found'
+        #print 'center found'
         if 1:
             limlo_x = max( int(center[0])-ROI_RADIUS, 0 )
             limlo_y = max( int(center[1])-ROI_RADIUS, 0 )
@@ -669,30 +673,78 @@ class uFrame:
         
 class MiniNPM:
     def __init__(self, npmovie):
+    
+        def trynone(target, source=None):
+            try:
+                target = copy.copy(source)
+            except:
+                target = None
+    
         self.background = copy.copy(npmovie.background)
-        self.obj = copy.copy(npmovie.obj)
-        self.kalmanobj = copy.copy(npmovie.kalmanobj)
-        self.sync2d3d = copy.copy(npmovie.sync2d3d)
+        
+        self.id = copy.copy(npmovie.id)
+        self.objid = copy.copy(npmovie.objid)
+        self.behavior = copy.copy(npmovie.behavior)
+        self.path = copy.copy(npmovie.path)
+        self.posttype = copy.copy(npmovie.posttype)
+        self.extras = copy.copy(npmovie.extras)
+        
+        try:
+            self.obj = copy.copy(npmovie.obj)
+        except:
+            self.obj = None
+            
+        try:
+            self.kalmanobj = copy.copy(npmovie.kalmanobj)
+        except:
+            self.kalmanobj = None
+            
+        try:
+            self.sync2d3d = copy.copy(npmovie.sync2d3d)
+        except:
+            self.sync2d3d = None
+        
+        try:
+            self.cluster = copy.copy(npmovie.cluster)
+        except:
+            self.cluster = None
         
         try:
             self.flycoord = copy.copy(npmovie.flycoord)
         except:
-            pass
+            self.flycoord = None
+            
         try:
             self.sa1_start_index = copy.copy(npmovie.sa1_start_index)
         except:
-            pass
+            self.sa1_start_index = None
             
-        self.fps = copy.copy(npmovie.fps)
-        self.trajec = copy.copy(npmovie.trajec)
-        self.timestamps = copy.copy(npmovie.timestamps)
+        try:    
+            self.fps = copy.copy(npmovie.fps)
+        except:
+            self.fps = None
+        
+        try:
+            self.timestamps = copy.copy(npmovie.timestamps)
+        except:
+            self.timestamps = None
+
         try:
             self.dataset_id = copy.copy(npmovie.dataset_id)
         except:
             self.dataset_id = None
-        self.epochtime = copy.copy(npmovie.epochtime)
+
+        try:        
+            self.trajec = copy.copy(npmovie.trajec)
+        except:
+            self.trajec = None
         
-        
+        try:
+            self.epochtime = copy.copy(npmovie.epochtime) 
+        except:
+            self.epochtime = None
+            
+                        
         self.uframes = [uFrame() for i in range(len(npmovie.uframes))]
         
         for i, uframe in enumerate(self.uframes):

@@ -95,7 +95,7 @@ def find_blobs(img, sizerange=[0,inf], aslist=False):
         if nblobs < 1:
             return np.zeros_like(img)
         else:
-            blobs = np.array( (blobs>0)*255, dtype=np.uint8)
+            blobs = np.array( blobs, dtype=np.uint8)
             return blobs
     else:
         if len(blob_list) < 1:

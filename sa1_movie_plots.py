@@ -22,6 +22,8 @@ from matplotlib.patches import Arc
 import adskalman.adskalman as adskalman
 import numpyimgproc as nim
 import pickle
+import datetime
+import time
 import pygmovie as pm
 import classification as clas
 import sa1_analysis as sa1
@@ -44,12 +46,15 @@ def get_active_frames(npmovie):
     except:
         frame_of_landing = -1
         
-    frames = np.nonzero(npmovie.obj.bool[0:frame_of_landing] > 100)[0]
+    frames = np.nonzero(npmovie.obj.bool[0:frame_of_landing] > 50)[0]
     
     framediff = np.diff(frames)==1
     blobs = nim.find_biggest_blob(framediff)
-    contframes = frames[ np.where(blobs==1)[0].tolist() ].tolist()
-
+    try:
+        contframes = frames[ np.where(blobs==1)[0].tolist() ].tolist()
+    except:
+        contframes = []
+        
     return contframes
     
 def get_all_frames(npmovie):
@@ -228,15 +233,19 @@ def plot_movie_data(npmovie, show_wings=False, figure=None, legthresh=50, show_v
         legs = npmovie.kalmanobj.legs[i]
         
         #### get color from kmeans clusters ###
-        speed = np.interp(npmovie.timestamps[i], npmovie.trajec.epoch_time, npmovie.trajec.speed)
-        slipangle = npmovie.flycoord.slipangle[i]
-        print npmovie.id, i
-        dyaw = np.interp(npmovie.timestamps[i], npmovie.trajec.epoch_time[npmovie.sync2d3d.frames3d], npmovie.sync2d3d.smoothyaw[:,1])
-        obs = np.nan_to_num(np.array([np.abs(dyaw), speed, np.abs(slipangle)]))
-        cluster = kn.get_cluster_for_data(npmovie, obs)
-        
         colormap = plt.get_cmap('jet')
-        color = colormap((cluster) / float(npmovie.cluster_means.shape[0]))
+        if npmovie.cluster is not None:
+            speed = np.interp(npmovie.timestamps[i], npmovie.trajec.epoch_time, npmovie.trajec.speed)
+            slipangle = npmovie.flycoord.slipangle[i]
+            print npmovie.id, i
+            dyaw = np.interp(npmovie.timestamps[i], npmovie.trajec.epoch_time[npmovie.sync2d3d.frames3d], npmovie.sync2d3d.smoothyaw[:,1])
+            obs = np.nan_to_num(np.array([np.abs(dyaw), speed, np.abs(slipangle)]))
+            cluster = kn.get_cluster_for_data(npmovie, obs)
+            color = colormap((cluster) / float(npmovie.cluster_means.shape[0]))
+        else:
+            speed = np.interp(npmovie.timestamps[i], npmovie.trajec.epoch_time, npmovie.trajec.speed)
+            color = colormap( speed )
+        
         print 'color: ', color
         
         arrow = Arrow(center[0], center[1], dx, dy, width=1.0, color=color)
@@ -484,10 +493,10 @@ def plot_wingbeats(npmovie):
 
 
 
-def pdf_movie_data(movie_dataset, scale = 10, movies = None):
+def pdf_movie_data(movie_dataset, scale = 10, movies = None, filename='sa1_movies_2_test.pdf'):
     
     # Initialize:
-    pp =  pdf.PdfPages('sa1_movies_2_test.pdf')
+    pp =  pdf.PdfPages(filename)
     f = 0
     
     if movies is None:
@@ -495,8 +504,6 @@ def pdf_movie_data(movie_dataset, scale = 10, movies = None):
     elif type(movies) is not list:
         movies = [movies]
        
-        
-    
     for key in movies:
         mnpmovie = movie_dataset[key]
         if mnpmovie.trajec is not None:
@@ -638,7 +645,8 @@ def convolve(a1, a2):
     
 def align_sa1_flydra(npmovie, plot=False):
 
-    try:
+    #try:
+    if 1:
         frames = get_active_frames(npmovie)
         first_frame_stamp = npmovie.timestamps[frames[0]]
         dt = npmovie.trajec.epoch_time - first_frame_stamp
@@ -646,7 +654,8 @@ def align_sa1_flydra(npmovie, plot=False):
         npmovie.sa1_start_frame = sa1_start_frame
         return True
 
-    except:
+    #except:
+    if 0:
         print 'no timestamp data'
         return False
     
@@ -812,6 +821,7 @@ def sync_2d_3d_data(npmovie, plot=False, res='lo'):
     if res == 'lo':
         is_sync_successful = align_sa1_flydra(npmovie, plot=False)
         if not is_sync_successful:
+            print 'unable to sync flydra and sa1'
             return is_sync_successful
         else:
             npmovie.sync2d3d = pm.Object(npmovie)
@@ -949,7 +959,11 @@ def get_sa1_timestamps_from_movie_dict(movie_dataset, movies):
             
             
 def smooth(data, Q, R, F=None, H=None, interpvals=0):
-    os = data.shape[1] # observation size
+    
+    try:
+        os = data.shape[1] # observation size
+    except:
+        os = 1
     ss = os*2 # state size
     
     if F is None:
@@ -977,7 +991,7 @@ def smooth(data, Q, R, F=None, H=None, interpvals=0):
     data = np.nan_to_num(data)
     interpolated_data = np.zeros_like(data)
     
-    for c in range(data.shape[1]):
+    for c in range(os):
         interpolated_data[:,c] = pm.interpolate(data[:,c], interpvals)
     y = interpolated_data
     initx = np.array([y[0,0],y[1,0]-y[0,0]],dtype=np.float)
@@ -987,6 +1001,77 @@ def smooth(data, Q, R, F=None, H=None, interpvals=0):
 
     return xsmooth, Vsmooth
             
-            
+
+def calc_smoothyaw(npmovie, plot=False):
+    
+    data = np.zeros([len(npmovie.sync2d3d.yaw), 1])
+    data[:,0] = npmovie.sync2d3d.yaw
+    Q = np.eye(2) # process noise
+    Q[0,0] = .001
+    Q[1,1] = 1
+    R = np.eye(.1) # observation noise
+    
+    x, err = smooth(data, Q, R, F=None, H=None, interpvals=0)
+    
+    if plot:
+        plt.plot(x[:,0])
+        plt.plot(data, '*')
+        plt.plot(x[:,1])
+    npmovie.sync2d3d.smoothyaw = x
+    return x
+
+def get_post_type_for_trajectory(trajec, post_type_dict):
+    
+    local_time = time.localtime(trajec.epoch_time[0])
+    datetime = str(local_time.tm_year) + str(local_time.tm_month) + str(local_time.tm_day)
+    print datetime
+
+    trajec.post_type = post_type_dict[datetime]
+    
+def convert_stringtime_to_epochtime(stringtime, dst=1):
+    # stringtime of form '20101103_102345'
+    
+    year = int(stringtime[0:4])
+    month = int(stringtime[4:6])
+    day = int(stringtime[6:8])
+    hour = int(stringtime[9:11])
+    minute = int(stringtime[11:13])
+    second = int(stringtime[13:15])
+    
+    dt = datetime.datetime(year,month,day,hour,minute,second)
+    cal = dt.isocalendar()
+    dayofyear = cal[1]*7+cal[2]
+    dayofweek = cal[2]
+    
+    struct_time = time.struct_time((year,month,day,hour,minute,second,dayofyear,dayofweek,dst))
+    epochtime = time.mktime(struct_time)
+    return epochtime
+
+def get_post_type_for_dataset(dataset):
+    
+    epochtimes = []
+    
+    post_types_black = ['black' for i in range(15)]
+    post_types_checkered = ['checkered' for i in range(15)]
+    post_types_none = ['none' for i in range(2)]
+    post_types = post_types_black + post_types_checkered + post_types_none
+    
+    for f in dataset.filename:
+        stringtime = f[4:19]
+        epochtime = convert_stringtime_to_epochtime(stringtime)
+        epochtimes.append(epochtime)
+    epochtimes = np.array(epochtimes)
+
+    for key, trajec in dataset.trajecs.items():
+        time_diff = trajec.epoch_time[0]*np.ones_like(epochtimes) - epochtimes
+        time_diff[time_diff<0] = np.inf
+        f = np.argmin(time_diff)
+        trajec.post_type = post_types[ f ]    
+    
+
+
+
+
+
 
 
